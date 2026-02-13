@@ -1,22 +1,26 @@
 const TicketType = require("../models/TicketType");
+const AppError = require("../utils/AppError");
 
-exports.createTicketType = async (req, res) => {
-  const { event, name, price, quantity } = req.body;
+exports.createTicketType = async (req, res, next) => {
+  try {
+    const { event, name, price, quantity } = req.body;
 
-  const ticketType = await TicketType.create({
-    event,
-    name,
-    price,
-    quantity,
-    remaining: quantity, // 🔥 QUAN TRỌNG
-  });
+    if (!event || !name) {
+      throw new AppError("Missing fields", 400);
+    }
 
-  res.json(ticketType);
-};
+    const ticketType = await TicketType.create({
+      event,
+      name,
+      price,
+      quantity,
+      remaining: quantity,
+    });
 
-exports.getTicketTypes = async (req, res) => {
-  const ticketTypes = await TicketType.find().populate("event");
-  res.json(ticketTypes);
+    res.json(ticketType);
+  } catch (err) {
+    next(err);
+  }
 };
 
 exports.updateTicketType = async (req, res) => {

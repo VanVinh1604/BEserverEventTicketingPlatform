@@ -12,7 +12,7 @@ const protect = (req, res, next) => {
   } catch {
     res.status(401).json({ message: "Invalid token" });
   }
-};
+}; 
 
 const authorize = (...roles) => {
   return (req, res, next) => {

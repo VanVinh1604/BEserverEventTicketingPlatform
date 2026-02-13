@@ -2,6 +2,8 @@ const { v4: uuidv4 } = require("uuid");
 const TicketType = require("../models/TicketType");
 const Order = require("../models/Order");
 const Ticket = require("../models/Ticket");
+const AppError = require("../utils/AppError");
+
 
 exports.buyTickets = async (req, res) => {
   try {
@@ -20,8 +22,8 @@ exports.buyTickets = async (req, res) => {
       { new: true }
     ).populate("event");
 
-    if (!ticketType) {
-      return res.status(400).json({ message: "Sold out" });
+   if (!ticketType) {
+        throw new AppError("Sold out", 400);
     }
 
     // 🔥 B2 — Tạo Order
@@ -56,9 +58,9 @@ exports.buyTickets = async (req, res) => {
       message: "Tickets purchased successfully",
       order,
     });
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
+ } catch (err) {
+  next(err);
+ }
 };
 
 exports.getMyOrders = async (req, res) => {

@@ -1,35 +1,27 @@
 const User = require("../models/User");
 const bcrypt = require("bcryptjs");
 const generateToken = require("../config/jwt");
+const AppError = require("../utils/AppError");
+
 
 // Register
-exports.register = async (req, res) => {
+exports.register = async (req, res, next) => {
   try {
-    console.log("Register hit"); // 👈 để debug
-
-    const { name, email, password } = req.body;
+    const { name, email, password,role } = req.body;
 
     const exist = await User.findOne({ email });
-    if (exist) {
-      return res.status(400).json({ message: "Email already exists" });
-    }
+    if (exist) throw new AppError("Email already exists", 400);
 
     const hashed = await bcrypt.hash(password, 10);
 
-    const user = new User({
-      name,
-      email,
-      password: hashed,
-    });
+    await User.create({ name, email, password: hashed ,  role: role || "user", });
 
-    await user.save();  // 👈 QUAN TRỌNG
-
-    return res.status(201).json({ message: "User registered" });
+    res.status(201).json({ message: "User registered" });
   } catch (err) {
-    console.error(err);
-    return res.status(500).json({ error: err.message });
+    next(err);
   }
 };
+
 
 
 // Login

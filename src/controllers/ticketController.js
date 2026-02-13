@@ -1,18 +1,15 @@
-const Ticket = require("../models/Ticket");
+const AppError = require("../utils/AppError");
 
-exports.checkInTicket = async (req, res) => {
+exports.checkInTicket = async (req, res, next) => {
   try {
     const { qrCode } = req.body;
 
     const ticket = await Ticket.findOne({ qrCode }).populate("event");
 
-    if (!ticket) {
-      return res.status(404).json({ message: "Invalid QR Code" });
-    }
+    if (!ticket) throw new AppError("Invalid QR Code", 404);
 
-    if (ticket.isCheckedIn) {
-      return res.status(400).json({ message: "Ticket already used" });
-    }
+    if (ticket.isCheckedIn)
+      throw new AppError("Ticket already used", 400);
 
     ticket.isCheckedIn = true;
     await ticket.save();
@@ -23,6 +20,6 @@ exports.checkInTicket = async (req, res) => {
       ticketId: ticket._id,
     });
   } catch (err) {
-    res.status(500).json({ message: err.message });
+    next(err);
   }
 };

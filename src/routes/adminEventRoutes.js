@@ -9,10 +9,18 @@ const {
   deleteEvent,
 } = require("../controllers/adminEventController");
 
+const upload = require("../middleware/uploadEventImage");
+
+
 // Áp RBAC cho toàn bộ route
 router.use(protect, authorize("admin"));
 
-router.post("/", createEvent);
+router.post(
+  "/",
+  upload.single("image"),
+  createEvent
+);
+
 router.get("/", getEvents);
 router.put("/:id", updateEvent);
 router.delete("/:id", deleteEvent);
