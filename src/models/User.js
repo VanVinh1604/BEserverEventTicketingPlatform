@@ -11,6 +11,9 @@ const userSchema = new mongoose.Schema({
     lowercase: true,   // ⭐ QUAN TRỌNG
     trim: true
   },
+  resetToken: String,
+  resetTokenExpire: Date,
+
 });
 
 module.exports = mongoose.model("User", userSchema);
