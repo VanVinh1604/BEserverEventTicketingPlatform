@@ -1,7 +1,11 @@
 const mongoose = require("mongoose");
 
 const eventSchema = new mongoose.Schema({
-  title: String,
+  title: {
+    type: String,
+    required: [true, 'Sự kiện phải có tiêu đề'],
+    trim: true
+  },
   description: String,
   location: String,
   startDate: Date,

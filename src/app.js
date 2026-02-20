@@ -1,22 +1,13 @@
 require("dotenv").config();
-
 const express = require("express");
 const cors = require("cors");
-
-
+const errorHandler = require("./middleware/errorMiddleware");
 
 const app = express();
-
-const authRoutes = require("./routes/authRoutes");
-const testRoutes = require("./routes/testRoutes");
-const ticketRoutes = require("./routes/ticketRoutes");
-
-const errorHandler = require("./middleware/errorMiddleware");
 
 app.use(cors());
 app.use(express.json());
 
-// Không log khi test
 if (process.env.NODE_ENV !== "test") {
   app.use((req, res, next) => {
     console.log("REQ:", req.method, req.url);
@@ -24,22 +15,23 @@ if (process.env.NODE_ENV !== "test") {
   });
 }
 
-app.use("/api/auth", authRoutes);
-app.use("/api/test", testRoutes);
+// --- CÁC ROUTE HỆ THỐNG ---
+app.use("/api/auth", require("./routes/authRoutes"));
+app.use("/api/orders", require("./routes/orderRoutes"));
+app.use("/api/events", require("./routes/eventRoutes"));
+app.use("/api/tickets", require("./routes/publicTicketRoutes"));
 
+// --- CÁC ROUTE QUẢN TRỊ (ADMIN) ---
+app.use("/api/admin/analytics", require("./routes/adminAnalyticsRoutes"));
 app.use("/api/admin/events", require("./routes/adminEventRoutes"));
 app.use("/api/admin/ticket-types", require("./routes/adminTicketTypeRoutes"));
 
-app.use("/api/orders", require("./routes/orderRoutes"));
-app.use("/api/tickets", ticketRoutes);
-
 app.use("/uploads", express.static("uploads"));
-app.use("/api/admin/analytics", require("./routes/adminAnalyticsRoutes"));
-
-app.use(errorHandler);
 
 app.get("/", (req, res) => {
   res.send("Event Ticketing API is running...");
 });
+
+app.use(errorHandler);
 
 module.exports = app;

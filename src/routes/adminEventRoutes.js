@@ -22,7 +22,7 @@ router.post(
 );
 
 router.get("/", getEvents);
-router.put("/:id", updateEvent);
+router.put("/:id", upload.single("image"), updateEvent);
 router.delete("/:id", deleteEvent);
 
 module.exports = router;
