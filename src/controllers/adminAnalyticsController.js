@@ -6,25 +6,39 @@ const Checkin = require("../models/Checkin");
 const AppError = require("../utils/AppError");
 
 
+exports.getRevenueByEvent = async (req, res, next) => {
+  try {
+    const page = req.query.page * 1 || 1;
+    const limit = req.query.limit * 1 || 10;
+    const skip = (page - 1) * limit;
 
-exports.getRevenueByEvent = async (req, res) => {
-try{
-  const revenue = await Order.aggregate([
-    { $match: { status: "paid" } },
-    {
-      $group: {
-        _id: "$event",
-        totalRevenue: { $sum: "$totalAmount" },
-        totalOrders: { $sum: 1 },
+    const revenue = await Order.aggregate([
+      { $match: { status: "paid" } },
+
+      {
+        $group: {
+          _id: "$event",
+          totalRevenue: { $sum: "$totalAmount" },
+          totalOrders: { $sum: 1 },
+        },
       },
-    },
-  ]);
 
-  res.json(revenue);
- } catch (err) {
+      { $sort: { totalRevenue: -1 } },
+      { $skip: skip },
+      { $limit: limit },
+    ]);
+
+    res.json({
+      success: true,
+      page,
+      results: revenue.length,
+      data: revenue,
+    });
+  } catch (err) {
     next(err);
   }
 };
+
 
 exports.getTicketStats = async (req, res) => {
 try{

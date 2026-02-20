@@ -4,11 +4,15 @@ const router = express.Router();
 const TicketType = require("../models/TicketType");
 const { protect, authorize } = require("../middleware/authMiddleware");
 
+const { validate } = require("../middleware/validate");
+const { createTicketTypeSchema } = require("../validators/ticketTypeValidator");
+const { idParamSchema } = require("../validators/commonValidator");
+
 // RBAC cho toàn bộ route
 router.use(protect, authorize("admin"));
 
 // CREATE
-router.post("/", async (req, res) => {
+router.post("/", validate(createTicketTypeSchema), async (req, res) => {
   try {
     const ticket = await TicketType.create(req.body);
     res.status(201).json(ticket);
@@ -24,7 +28,7 @@ router.get("/", async (req, res) => {
 });
 
 // UPDATE
-router.put("/:id", async (req, res) => {
+router.put("/:id", validate(idParamSchema, "params"), async (req, res) => {
   const ticket = await TicketType.findByIdAndUpdate(
     req.params.id,
     req.body,
@@ -34,7 +38,7 @@ router.put("/:id", async (req, res) => {
 });
 
 // DELETE
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", validate(idParamSchema, "params"),async (req, res) => {
   await TicketType.findByIdAndDelete(req.params.id);
   res.json({ message: "Deleted" });
 });
