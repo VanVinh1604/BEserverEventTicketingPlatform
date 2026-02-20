@@ -1,13 +1,12 @@
 const express = require("express");
 const router = express.Router();
-
-const { buyTickets, getMyOrders } = require("../controllers/orderController");
-const { protect } = require("../middleware/authMiddleware");
+const { buyTickets, getMyOrders, getAllOrdersAdmin } = require("../controllers/orderController");
+const { protect, authorize } = require("../middleware/authMiddleware");
 const { validate } = require("../middleware/validate");
 const { buyTicketSchema } = require("../validators/orderValidator");
 
-// ✅ route user mua vé
-router.post("/buy", protect,  validate(buyTicketSchema), buyTickets);
+router.post("/buy", protect, buyTickets);
 router.get("/my-orders", protect, getMyOrders);
+router.get("/", protect, authorize("admin"), getAllOrdersAdmin);
 
 module.exports = router;

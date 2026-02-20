@@ -20,6 +20,7 @@
     "jsonwebtoken": "^9.0.3",
     "mongoose": "^9.1.5",
     "multer": "^2.0.2",
+    "nodemailer": "^8.0.1",
     "uuid": "^8.3.2"
   },
   "devDependencies": {
@@ -29,7 +30,9 @@
     "supertest": "^7.2.2"
   },
   "jest": {
-     "setupFilesAfterEnv": ["<rootDir>/src/tests/jest.setup.js"],
-     "testEnvironment": "node"
+    "setupFilesAfterEnv": [
+      "<rootDir>/src/tests/jest.setup.js"
+    ],
+    "testEnvironment": "node"
   }
 }

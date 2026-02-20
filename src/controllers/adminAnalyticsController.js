@@ -1,10 +1,7 @@
-// src/controllers/adminAnalyticsController.js
-
 const Order = require("../models/Order");
 const TicketType = require("../models/TicketType");
 const Checkin = require("../models/Checkin");
-const AppError = require("../utils/AppError");
-
+const Ticket = require("../models/Ticket"); // Cần thêm Model Ticket vào đây
 
 exports.getRevenueByEvent = async (req, res, next) => {
   try {
@@ -39,7 +36,7 @@ exports.getRevenueByEvent = async (req, res, next) => {
   }
 };
 
-
+// ====== THỐNG KÊ SỐ VÉ (Dashboard) ======
 exports.getTicketStats = async (req, res) => {
 try{
   const stats = await TicketType.aggregate([
@@ -54,25 +51,60 @@ try{
     },
   ]);
 
-    res.json(stats);
-   } catch (err) {
-    next(err);
-  }
+    res.json({ success: true, data: revenue });
+  } catch (err) { next(err); }
 };
 
-exports.getCheckinStats = async (req, res) => {
-try{
-  const stats = await Checkin.aggregate([
-    {
-      $group: {
-        _id: "$event",
-        totalCheckins: { $sum: 1 },
-      },
-    },
-  ]);
+// ====== DANH SÁCH VÉ (Check-in page) ======
+exports.getAllTickets = async (req, res, next) => {
+  try {
+    // 1. Lấy toàn bộ danh sách vé để hiển thị ở bảng "Danh sách điểm danh"
+    // Phải dùng .populate để lấy tên sự kiện và thông tin khách hàng
+    const allTickets = await Ticket.find()
+      .populate("event", "title name")
+      .populate("user", "name email")
+      .populate("ticketType", "name")
+      .sort({ createdAt: -1 });
 
-  res.json(stats);
- } catch (err) {
-    next(err);
+    // 2. Trả về đúng cấu trúc mà AdminCheckIn.jsx yêu cầu (res.data.data.allTickets)
+    res.json({ 
+      success: true, 
+      data: { 
+        allTickets: allTickets 
+      } 
+    });
+  } catch (err) { next(err); }
+};
+
+exports.getCheckinStats = async (req, res, next) => {
+  try {
+    // 1. Đếm tổng số vé hiện có trên toàn hệ thống
+    const totalTickets = await Ticket.countDocuments();
+
+    // 2. Đếm tổng số lượt đã check-in (dựa trên bảng Checkin)
+    const checkedIn = await Checkin.countDocuments();
+
+    // 3. Thống kê chi tiết theo từng sự kiện (giữ lại logic cũ của bạn)
+    const statsByEvent = await Checkin.aggregate([
+      {
+        $group: {
+          _id: "$event",
+          totalCheckins: { $sum: 1 },
+        },
+      },
+    ]);
+
+    // Trả về object chứa đầy đủ các con số để Frontend hiển thị lên Dashboard
+    res.json({ 
+      success: true, 
+      data: {
+        totalTickets,        // Hiển thị ô "TỔNG VÉ"
+        checkedIn,           // Hiển thị ô "ĐÃ CHECK-IN"
+        pending: totalTickets - checkedIn, // Hiển thị ô "CHƯA VÀO"
+        statsByEvent         // Dữ liệu chi tiết nếu cần vẽ biểu đồ
+      } 
+    });
+  } catch (err) { 
+    next(err); 
   }
 };

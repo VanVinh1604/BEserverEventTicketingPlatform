@@ -1,44 +1,50 @@
 const Ticket = require("../models/Ticket");
 const Checkin = require("../models/Checkin");
 const AppError = require("../utils/AppError");
+const mongoose = require("mongoose");
+
 
 exports.checkInTicket = async (req, res, next) => {
   try {
-    const { qrCode } = req.body;
+    const { qrCode } = req.body; 
 
-    const ticket = await Ticket.findOne({ qrCode })
-      .populate("event")
-      .populate("user");
+    // Tìm vé theo QR hoặc ID
+    const ticket = await Ticket.findOne({
+      $or: [
+        { qrCode: qrCode },
+        { _id: mongoose.Types.ObjectId.isValid(qrCode) ? qrCode : new mongoose.Types.ObjectId() }
+      ]
+    });
 
+    // Kiểm tra nếu không thấy vé
     if (!ticket) {
-      return next(new AppError("Invalid QR Code", 404));
+      return res.status(400).json({ success: false, message: "Vé không tồn tại!" });
     }
 
-    if (ticket.isCheckedIn) {
-      return next(new AppError("Ticket already used", 400));
+    // Kiểm tra nếu vé đã dùng rồi
+    if (ticket.status === "used") {
+      return res.status(400).json({ success: false, message: "Vé này đã được check-in trước đó!" });
     }
 
-    // 🔥 update ticket
-    ticket.isCheckedIn = true;
+    // Cập nhật vé thành 'used'
+    ticket.status = "used";
     ticket.checkedInAt = new Date();
     await ticket.save();
 
-    // 🔥 create checkin record
+    // TẠO DÒNG DỮ LIỆU MỚI VÀO BẢNG CHECKINS
     await Checkin.create({
       ticket: ticket._id,
-      event: ticket.event._id,
-      user: ticket.user._id,
+      event: ticket.event,
+      user: ticket.user,
+      checkInTime: new Date()
     });
 
-    res.json({
+    res.status(200).json({
       success: true,
-      message: "Check-in successful",
-      event: ticket.event.title,
-      attendee: ticket.user.name,
-      checkedInAt: ticket.checkedInAt,
+      message: "Check-in thành công!",
+      data: ticket
     });
-
-  } catch (err) {
-    next(err);
+  } catch (error) {
+    next(error);
   }
 };

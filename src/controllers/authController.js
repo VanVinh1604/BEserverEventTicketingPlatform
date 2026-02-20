@@ -1,130 +1,186 @@
 const User = require("../models/User");
-const bcrypt = require("bcryptjs");
+const jwt = require("jsonwebtoken");
+const crypto = require("crypto");
+// Đảm bảo đường dẫn này đúng với máy bạn (file tạo token)
 const { generateAccessToken, generateRefreshToken } = require("../config/jwt");
-const AppError = require("../utils/AppError");
 
+// --- 1. ĐĂNG KÝ (REGISTER) ---
+exports.register = async (req, res) => {
+  // [DEBUG] Log xem dữ liệu Frontend gửi lên là gì
+  console.log("👉 [REGISTER START] Body:", req.body);
 
-// Register
-exports.register = async (req, res, next) => {
   try {
-    const { name, email, password,role } = req.body;
+    const { username, email, password } = req.body;
 
-    const exist = await User.findOne({ email });
-    if (exist) throw new AppError("Email already exists", 400);
+    // 1. Kiểm tra xem user có tồn tại chưa
+    const exists = await User.findOne({ email });
+    if (exists) {
+      console.log("❌ [REGISTER ERROR] Email đã tồn tại:", email);
+      return res.status(400).json({ message: "Email đã tồn tại" });
+    }
 
-    const hashed = await bcrypt.hash(password, 10);
+    console.log("✅ [REGISTER] Email hợp lệ. Đang tạo User...");
 
-    await User.create({ name, email, password: hashed ,  role: role || "user", });
+    // 2. Tạo User mới (Mongoose tự mã hóa password)
+    const newUser = await User.create({ username, email, password });
 
-    res.status(201).json({ message: "User registered" });
-  } catch (err) {
-    next(err);
-  }
-};
+    console.log("✅ [REGISTER] User đã tạo xong ID:", newUser._id);
 
+    // 3. Tạo Token
+    const accessToken = generateAccessToken(newUser);
+    const refreshToken = generateRefreshToken(newUser);
 
+    // 4. Lưu Refresh Token vào DB
+    newUser.refreshToken = refreshToken;
+    await newUser.save({ validateBeforeSave: false });
 
-// Login
-// Login
-exports.login = async (req, res) => {
-  try {
-    const { email, password } = req.body;
+    console.log("✅ [REGISTER] Đã lưu Token. Gửi phản hồi...");
 
-    const user = await User.findOne({ email });
-    if (!user) return res.status(400).json({ message: "Invalid credentials" });
+    // 5. Trả về kết quả
+    newUser.password = undefined; // Ẩn mật khẩu
 
-    const match = await bcrypt.compare(password, user.password);
-    if (!match) return res.status(400).json({ message: "Invalid credentials" });
-
-    const accessToken = generateAccessToken(user);
-    const refreshToken = generateRefreshToken(user);
-
-    res.json({
+    res.status(201).json({
+      status: "success",
+      message: "Đăng ký thành công!",
       accessToken,
       refreshToken,
-      role: user.role,
-      name: user.name,
+      data: { user: newUser },
     });
 
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error("🔥 [REGISTER EXCEPTION]:", err); // In lỗi chi tiết ra
+    // Xử lý lỗi trùng lặp (E11000)
+    if (err.code === 11000) {
+        return res.status(400).json({ message: "Tên đăng nhập hoặc Email đã tồn tại" });
+    }
+    res.status(500).json({ message: err.message });
   }
 };
 
+// --- 2. ĐĂNG NHẬP (LOGIN) ---
+exports.login = async (req, res) => {
+  // [DEBUG] Log dữ liệu đăng nhập
+  console.log("👉 [LOGIN START] Body:", req.body);
+
+  try {
+    const { email, password } = req.body;
+
+    // 1. Tìm user (lấy cả password đã mã hóa)
+    const user = await User.findOne({ email }).select("+password");
+
+    if (!user) {
+      console.log("❌ [LOGIN ERROR] Không tìm thấy Email:", email);
+      return res.status(401).json({ message: "Email hoặc mật khẩu không đúng" });
+    }
+
+    // 2. So khớp mật khẩu
+    const isMatch = await user.matchPassword(password);
+    if (!isMatch) {
+      console.log("❌ [LOGIN ERROR] Sai mật khẩu cho:", email);
+      return res.status(401).json({ message: "Email hoặc mật khẩu không đúng" });
+    }
+
+    console.log("✅ [LOGIN] Mật khẩu đúng. Đang tạo Token...");
+
+    // 3. Tạo Token mới
+    const accessToken = generateAccessToken(user);
+    const refreshToken = generateRefreshToken(user);
+
+    // 4. Lưu Refresh Token mới
+    user.refreshToken = refreshToken;
+    await user.save({ validateBeforeSave: false });
+
+    // 5. Trả về
+    user.password = undefined;
+    
+    res.json({
+      status: "success",
+      accessToken,
+      refreshToken,
+      data: {
+        user: {
+            _id: user._id,
+            username: user.username,
+            email: user.email,
+            role: user.role
+        }
+      },
+    });
+
+  } catch (err) {
+    console.error("🔥 [LOGIN EXCEPTION]:", err);
+    res.status(500).json({ message: err.message });
+  }
+};
+
+// --- 3. REFRESH TOKEN ---
 exports.refreshToken = async (req, res) => {
   const { refreshToken } = req.body;
-
-  if (!refreshToken)
-    return res.status(401).json({ message: "No refresh token" });
+  if (!refreshToken) return res.status(401).json({ message: "Chưa gửi Refresh Token" });
 
   try {
-    const decoded = require("jsonwebtoken").verify(
-      refreshToken,
-      process.env.JWT_REFRESH_SECRET
-    );
-
+    const decoded = jwt.verify(refreshToken, process.env.JWT_REFRESH_SECRET);
     const user = await User.findById(decoded.id);
-    if (!user)
-      return res.status(404).json({ message: "User not found" });
+    
+    // Check token khớp DB không
+    if (!user || user.refreshToken !== refreshToken) {
+       return res.status(403).json({ message: "Token không hợp lệ!" });
+    }
 
     const newAccessToken = generateAccessToken(user);
-
     res.json({ accessToken: newAccessToken });
-
-  } catch {
-    res.status(403).json({ message: "Invalid refresh token" });
+  } catch (err) {
+    res.status(403).json({ message: "Token hết hạn hoặc lỗi" });
   }
 };
 
-//forget password password
+// --- 4. QUÊN MẬT KHẨU ---
 exports.forgotPassword = async (req, res) => {
-  const { email } = req.body;
+  try {
+    const user = await User.findOne({ email: req.body.email });
+    if (!user) return res.status(404).json({ message: "Email không tồn tại" });
 
-  const user = await User.findOne({ email });
-  if (!user)
-    return res.status(404).json({ message: "User not found" });
+    // Tạo token ngẫu nhiên
+    const resetToken = crypto.randomBytes(20).toString("hex");
+    
+    // Hash token lưu DB
+    user.resetPasswordToken = crypto.createHash("sha256").update(resetToken).digest("hex");
+    user.resetPasswordExpire = Date.now() + 10 * 60 * 1000; // 10 phút
 
-  const resetToken = require("jsonwebtoken").sign(
-    { id: user._id },
-    process.env.JWT_SECRET,
-    { expiresIn: "10m" }
-  );
+    await user.save({ validateBeforeSave: false });
 
-  user.resetToken = resetToken;
-  user.resetTokenExpire = Date.now() + 10 * 60 * 1000;
-
-  await user.save();
-
-  res.json({
-    message: "Reset token generated",
-    resetToken, // để test, thực tế sẽ gửi email
-  });
+    // Trả token về (Môi trường dev)
+    res.status(200).json({
+      status: "success",
+      message: "Token reset đã được gửi",
+      resetToken: resetToken 
+    });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
 };
 
-//Reset password 
+// --- 5. ĐẶT LẠI MẬT KHẨU ---
 exports.resetPassword = async (req, res) => {
-  const { token } = req.params;
-  const { newPassword } = req.body;
-
   try {
-    const decoded = require("jsonwebtoken").verify(
-      token,
-      process.env.JWT_SECRET
-    );
+    const hashedToken = crypto.createHash("sha256").update(req.params.token).digest("hex");
 
-    const user = await User.findById(decoded.id);
+    const user = await User.findOne({
+      resetPasswordToken: hashedToken,
+      resetPasswordExpire: { $gt: Date.now() }
+    });
 
-    const hashed = await bcrypt.hash(newPassword, 10);
+    if (!user) return res.status(400).json({ message: "Token không hợp lệ hoặc hết hạn" });
 
-    user.password = hashed;
-    user.resetToken = null;
-    user.resetTokenExpire = null;
+    // Lưu ý: Frontend cần gửi field là newPassword
+    user.password = req.body.newPassword; 
+    user.resetPasswordToken = undefined;
+    user.resetPasswordExpire = undefined;
 
     await user.save();
 
-    res.json({ message: "Password reset successful" });
-
-  } catch {
-    res.status(400).json({ message: "Invalid or expired token" });
+    res.status(200).json({ status: "success", message: "Đổi mật khẩu thành công!" });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
   }
 };

@@ -1,26 +1,46 @@
 const express = require("express");
 const router = express.Router();
-const { register, login } = require("../controllers/authController");
-const {  forgotPassword,  resetPassword,} = require("../controllers/authController");
 
-const { validate } = require("../middleware/validate");
+// Controllers
+const {
+  register,
+  login,
+  refreshToken,
+  forgotPassword,
+  resetPassword,
+} = require("../controllers/authController");
+
+// Validation middleware + schemas
+const {
+  validate,
+  registerSchema,
+  loginSchema,
+} = require("../middleware/validate");
+
 const { tokenParamSchema } = require("../validators/commonValidator");
-const { refreshToken } = require("../controllers/authController");
 
-const { registerSchema, loginSchema } = require("../validators/authValidator");
 
+// ===============================
+// AUTH ROUTES
+// ===============================
+
+// Register
 router.post("/register", validate(registerSchema), register);
+
+// Login
 router.post("/login", validate(loginSchema), login);
 
-
+// Refresh token
 router.post("/refresh", refreshToken);
 
+// Forgot password
 router.post("/forgot-password", forgotPassword);
+
+// Reset password
 router.post(
   "/reset-password/:token",
   validate(tokenParamSchema, "params"),
   resetPassword
 );
-
 
 module.exports = router;

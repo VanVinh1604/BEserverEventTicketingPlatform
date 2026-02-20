@@ -2,31 +2,37 @@ const mongoose = require("mongoose");
 
 const checkinSchema = new mongoose.Schema(
   {
+    // 🔥 Mỗi vé chỉ được check-in 1 lần
     ticket: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Ticket",
       required: true,
-      unique: true, // 🔥 đảm bảo 1 ticket chỉ checkin 1 lần
+      unique: true
     },
 
+    // Sự kiện của vé
     event: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Event",
-      required: true,
+      required: true
     },
 
+    // Người sở hữu vé
     user: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
-      required: true,
+      required: true
     },
 
-    checkinTime: {
+    // Thời điểm check-in
+    checkInTime: {
       type: Date,
-      default: Date.now,
-    },
+      default: Date.now
+    }
   },
-  { timestamps: true }
+  {
+    timestamps: true
+  }
 );
 
 module.exports = mongoose.model("Checkin", checkinSchema);
