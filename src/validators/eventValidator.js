@@ -5,4 +5,6 @@ exports.createEventSchema = Joi.object({
   description: Joi.string().min(10).required(),
   location: Joi.string().required(),
   // image: Joi.string().required(),
+    date: Joi.date().required(),
+  image: Joi.string().optional()
 });

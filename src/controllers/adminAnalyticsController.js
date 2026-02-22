@@ -37,7 +37,7 @@ exports.getRevenueByEvent = async (req, res, next) => {
 };
 
 // ====== THỐNG KÊ SỐ VÉ (Dashboard) ======
-exports.getTicketStats = async (req, res) => {
+exports.getTicketStats = async (req, res,next) => {
 try{
   const stats = await TicketType.aggregate([
     {
@@ -51,7 +51,7 @@ try{
     },
   ]);
 
-    res.json({ success: true, data: revenue });
+    res.json({ success: true, data: stats });
   } catch (err) { next(err); }
 };
 

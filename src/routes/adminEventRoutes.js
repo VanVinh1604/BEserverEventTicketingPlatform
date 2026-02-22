@@ -25,7 +25,7 @@ router.use(protect, authorize("admin"));
 router.post(
   "/",
   upload.single("image"),
-  validate(createEventSchema),   
+  // validate(createEventSchema),   
   createEvent
 );
 
