@@ -26,7 +26,7 @@ app.use("/api/admin/analytics", require("./routes/adminAnalyticsRoutes"));
 app.use("/api/admin/events", require("./routes/adminEventRoutes"));
 app.use("/api/admin/ticket-types", require("./routes/adminTicketTypeRoutes"));
 
-app.use("/uploads", express.static("uploads"));
+// app.use("/uploads", express.static("uploads"));
 
 app.get("/", (req, res) => {
   res.send("Event Ticketing API is running...");

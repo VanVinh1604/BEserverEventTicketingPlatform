@@ -13,9 +13,7 @@ exports.createEvent = async (req, res, next) => {
       return next(new AppError("Title and location are required", 400));
     }
 
-    const imagePath = req.file
-      ? `/uploads/events/${req.file.filename}`
-      : null;
+    const imagePath = req.file ? req.file.path : null;
 
     const event = await Event.create({
       title,
@@ -29,6 +27,7 @@ exports.createEvent = async (req, res, next) => {
       success: true,
       data: event,
     });
+    console.log(req.file);
   } catch (err) {
     next(err);
   }
