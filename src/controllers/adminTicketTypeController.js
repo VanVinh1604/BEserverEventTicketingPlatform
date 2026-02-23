@@ -6,9 +6,9 @@ exports.createTicketType = async (req, res, next) => {
   try {
     const { event, name, price, quantity } = req.body;
 
-    if (!event || !name) {
-      throw new AppError("Missing fields", 400);
-    }
+  if (!event || !name || price === undefined || quantity === undefined) {
+  throw new AppError("Missing required fields", 400);
+}
 
     const ticketType = await TicketType.create({
       event,
@@ -17,6 +17,7 @@ exports.createTicketType = async (req, res, next) => {
       quantity,
       remaining: quantity,
     });
+    console.log(req.body);
 
     res.json(ticketType);
   } catch (err) {

@@ -85,7 +85,16 @@ router.get("/", async (req, res) => {
 router.use(protect, authorize("admin"));
 
 router.post("/", validate(createTicketTypeSchema), async (req, res) => {
-  const ticket = await TicketType.create(req.body);
+  const { event, name, price, quantity } = req.body;
+
+  const ticket = await TicketType.create({
+    event,
+    name,
+    price,
+    quantity,
+    remaining: quantity, // 🔥 FIX Ở ĐÂY
+  });
+
   res.status(201).json(ticket);
 });
 
