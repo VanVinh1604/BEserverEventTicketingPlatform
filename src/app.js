@@ -20,6 +20,12 @@ app.use("/api/auth", require("./routes/authRoutes"));
 app.use("/api/orders", require("./routes/orderRoutes"));
 app.use("/api/events", require("./routes/eventRoutes"));
 app.use("/api/tickets", require("./routes/publicTicketRoutes"));
+app.use("/api/admin/users", require("./routes/Adminuserroutes"));
+
+
+
+
+
 
 // --- CÁC ROUTE QUẢN TRỊ (ADMIN) ---
 app.use("/api/admin/analytics", require("./routes/adminAnalyticsRoutes"));
