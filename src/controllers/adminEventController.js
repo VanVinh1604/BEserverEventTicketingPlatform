@@ -89,12 +89,22 @@ exports.getEvents = async (req, res, next) => {
 };
 
 
+
 // ✅ UPDATE EVENT
 exports.updateEvent = async (req, res, next) => {
   try {
-    const event = await Event.findByIdAndUpdate(req.params.id, req.body, {
-      new: true,
-    });
+    const updateData = { ...req.body };
+
+    // Nếu có upload ảnh mới → lấy từ Cloudinary
+    if (req.file) {
+      updateData.image = req.file.path;
+    }
+
+    const event = await Event.findByIdAndUpdate(
+      req.params.id,
+      updateData,
+      { new: true }
+    );
 
     if (!event) {
       return next(new AppError("Event not found", 404));
@@ -104,6 +114,7 @@ exports.updateEvent = async (req, res, next) => {
       success: true,
       data: event,
     });
+
   } catch (err) {
     next(err);
   }

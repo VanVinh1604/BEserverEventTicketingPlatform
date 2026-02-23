@@ -39,6 +39,7 @@ router.get(
 router.put(
   "/:id",
   validate(idParamSchema, "params"),
+  upload.single("image"),
   updateEvent
 );
 

@@ -4,7 +4,7 @@ const APIFeatures = require("../middleware/apiFeatures");
 exports.getEvents = async (req, res, next) => {
   try {
     const features = new APIFeatures(
-      Event.find({ isPublished: true }).lean(),
+    Event.find().lean(),
       req.query
     )
       .filter()
