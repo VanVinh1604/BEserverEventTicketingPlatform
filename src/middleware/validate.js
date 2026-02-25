@@ -1,6 +1,6 @@
 const Joi = require("joi");
 
-// 🔥 Middleware generic
+// ================== GENERIC VALIDATE MIDDLEWARE ==================
 exports.validate = (schema, property = "body") => (req, res, next) => {
   const { error } = schema.validate(req[property], { abortEarly: false });
 

@@ -5,3 +5,4 @@ const { getEvents } = require("../controllers/eventController");
 router.get("/", getEvents);
 
 module.exports = router;
+

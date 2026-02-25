@@ -4,6 +4,7 @@ const AppError = require("../utils/AppError");
 const mongoose = require("mongoose");
 
 
+
 exports.checkInTicket = async (req, res, next) => {
   try {
     const { qrCode } = req.body; 

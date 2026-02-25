@@ -7,15 +7,14 @@ const sendEmail = require("../utils/sendEmail");
 const APIFeatures = require("../middleware/apiFeatures");
 
 
-// =============================================
+// =====================================================
 // 🔥 BUY TICKETS
-// =============================================
+// =====================================================
 exports.buyTickets = async (req, res, next) => {
   try {
     const userId = req.user.id;
     const { tickets, ticketTypeId, quantity, customerInfo } = req.body;
 
-    // Hỗ trợ mua 1 hoặc nhiều loại vé
     const items = Array.isArray(tickets)
       ? tickets
       : [{ ticketTypeId, quantity }];
@@ -28,8 +27,14 @@ exports.buyTickets = async (req, res, next) => {
     let finalEventId = null;
     const createdTicketIds = [];
 
-    // 🔥 Anti oversell (atomic update)
+    // =====================================================
+    // 🔥 Anti-oversell (Atomic update)
+    // =====================================================
     for (const item of items) {
+      if (!item.ticketTypeId || !item.quantity || item.quantity <= 0) {
+        return next(new AppError("Dữ liệu vé không hợp lệ", 400));
+      }
+
       const ticketType = await TicketType.findOneAndUpdate(
         {
           _id: item.ticketTypeId,
@@ -42,28 +47,30 @@ exports.buyTickets = async (req, res, next) => {
       ).populate("event");
 
       if (!ticketType) {
-        throw new AppError("Vé không đủ số lượng hoặc đã bán hết", 400);
+        return next(new AppError("Vé không đủ số lượng hoặc đã bán hết", 400));
       }
 
       finalEventId = ticketType.event._id;
       totalAmount += ticketType.price * item.quantity;
 
+      // Tạo từng ticket
       for (let i = 0; i < item.quantity; i++) {
         const ticket = await Ticket.create({
-          order: null, // gán sau
           user: userId,
           event: finalEventId,
           ticketType: ticketType._id,
           price: ticketType.price,
           qrCode: uuidv4(),
-          status: "active",
+          status: "active", // quan trọng để check-in
         });
 
         createdTicketIds.push(ticket._id);
       }
     }
 
-    // 🔥 Tạo Order
+    // =====================================================
+    // 🔥 TẠO ORDER
+    // =====================================================
     const order = await Order.create({
       user: userId,
       event: finalEventId,
@@ -73,13 +80,13 @@ exports.buyTickets = async (req, res, next) => {
       tickets: createdTicketIds,
     });
 
-    // 🔥 Gắn order vào ticket
+    // Gắn order vào ticket
     await Ticket.updateMany(
       { _id: { $in: createdTicketIds } },
       { order: order._id }
     );
 
-    // 🔥 Populate để trả về frontend
+    // Populate để trả về frontend
     const populatedOrder = await Order.findById(order._id)
       .populate("event")
       .populate({
@@ -87,7 +94,9 @@ exports.buyTickets = async (req, res, next) => {
         populate: { path: "ticketType" },
       });
 
-    // 🔥 Gửi email xác nhận
+    // =====================================================
+    // 🔥 GỬI EMAIL
+    // =====================================================
     if (customerInfo?.email) {
       try {
         const eventTitle =
@@ -116,7 +125,7 @@ exports.buyTickets = async (req, res, next) => {
       }
     }
 
-    res.json({
+    res.status(201).json({
       success: true,
       message: "Đặt vé thành công!",
       data: populatedOrder,
@@ -129,9 +138,9 @@ exports.buyTickets = async (req, res, next) => {
 
 
 
-// =============================================
-// 🔥 GET MY ORDERS (có filter / sort / paginate)
-// =============================================
+// =====================================================
+// 🔥 GET MY ORDERS (Filter / Sort / Paginate)
+// =====================================================
 exports.getMyOrders = async (req, res, next) => {
   try {
     const features = new APIFeatures(
@@ -162,9 +171,9 @@ exports.getMyOrders = async (req, res, next) => {
 
 
 
-// =============================================
+// =====================================================
 // 🔥 ADMIN - GET ALL ORDERS
-// =============================================
+// =====================================================
 exports.getAllOrdersAdmin = async (req, res, next) => {
   try {
     const orders = await Order.find()

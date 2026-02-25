@@ -12,6 +12,7 @@ exports.getRevenueByEvent = async (req, res, next) => {
     const revenue = await Order.aggregate([
       { $match: { status: "paid" } },
 
+
       {
         $group: {
           _id: "$event",
@@ -19,44 +20,12 @@ exports.getRevenueByEvent = async (req, res, next) => {
           totalOrders: { $sum: 1 },
         },
       },
-
-      { $sort: { totalRevenue: -1 } },
-      { $skip: skip },
-      { $limit: limit },
     ]);
-
-    res.json({
-      success: true,
-      page,
-      results: revenue.length,
-      data: revenue,
-    });
-  } catch (err) {
-    next(err);
-  }
-};
-
-// ====== THỐNG KÊ SỐ VÉ (Dashboard) ======
-exports.getTicketStats = async (req, res,next) => {
-try{
-  const stats = await TicketType.aggregate([
-    {
-      $project: {
-        name: 1,
-        event: 1,
-        quantity: 1,
-        remaining: 1,
-        sold: { $subtract: ["$quantity", "$remaining"] },
-      },
-    },
-  ]);
-
-    res.json({ success: true, data: stats });
+    res.json({ success: true, data: revenue });
   } catch (err) { next(err); }
 };
 
-// ====== DANH SÁCH VÉ (Check-in page) ======
-exports.getAllTickets = async (req, res, next) => {
+exports.getTicketStats = async (req, res, next) => {
   try {
     // 1. Lấy toàn bộ danh sách vé để hiển thị ở bảng "Danh sách điểm danh"
     // Phải dùng .populate để lấy tên sự kiện và thông tin khách hàng

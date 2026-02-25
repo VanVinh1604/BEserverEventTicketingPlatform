@@ -1,5 +1,6 @@
 const mongoose = require("mongoose");
 
+
 const checkinSchema = new mongoose.Schema(
   {
     // 🔥 Mỗi vé chỉ được check-in 1 lần
@@ -34,5 +35,6 @@ const checkinSchema = new mongoose.Schema(
     timestamps: true
   }
 );
+
 
 module.exports = mongoose.model("Checkin", checkinSchema);
