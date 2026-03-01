@@ -34,6 +34,26 @@ exports.createEvent = async (req, res, next) => {
   }
 };
 
+// Cập nhật đơn hàng sang đã thanh toán thủ công
+exports.confirmOrderPayment = async (req, res) => {
+    try {
+        const { orderId } = req.params;
+        const order = await Order.findByIdAndUpdate(
+            orderId, 
+            { status: 'paid' }, 
+            { new: true }
+        );
+        
+        // Gửi email vé sau khi admin xác nhận (giống thực tế)
+        // sendEmail(order.customerInfo.email, "Vé của bạn đã sẵn sàng", ...);
+
+        res.json({ message: "Xác nhận thanh toán thành công!", order });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+};
+
+
 
 // ✅ CREATE TICKET TYPE
 exports.createTicketType = async (req, res, next) => {

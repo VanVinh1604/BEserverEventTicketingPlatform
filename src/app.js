@@ -5,8 +5,9 @@ const errorHandler = require("./middleware/errorMiddleware");
 
 const app = express();
 
+// 1. Cấu hình Middleware cơ bản
 app.use(cors());
-app.use(express.json());
+app.use(express.json()); // Đã đặt đúng chỗ để đọc dữ liệu từ PayOS
 
 if (process.env.NODE_ENV !== "test") {
   app.use((req, res, next) => {
@@ -15,19 +16,18 @@ if (process.env.NODE_ENV !== "test") {
   });
 }
 
-// --- CÁC ROUTE HỆ THỐNG ---
+// 2. ĐĂNG KÝ ROUTE THANH TOÁN (BẠN ĐANG THIẾU DÒNG NÀY)
+// Đảm bảo file ./routes/paymentRoutes đã tồn tại
+app.use("/api/payments", require("./routes/paymentRoutes")); 
+
+// 3. CÁC ROUTE HỆ THỐNG KHÁC
 app.use("/api/auth", require("./routes/authRoutes"));
 app.use("/api/orders", require("./routes/orderRoutes"));
 app.use("/api/events", require("./routes/eventRoutes"));
 app.use("/api/tickets", require("./routes/publicTicketRoutes"));
 app.use("/api/admin/users", require("./routes/Adminuserroutes"));
 
-
-
-
-
-
-// --- CÁC ROUTE QUẢN TRỊ (ADMIN) ---
+// 4. CÁC ROUTE QUẢN TRỊ (ADMIN)
 app.use("/api/admin/analytics", require("./routes/adminAnalyticsRoutes"));
 app.use("/api/admin/events", require("./routes/adminEventRoutes"));
 app.use("/api/admin/ticket-types", require("./routes/adminTicketTypeRoutes"));

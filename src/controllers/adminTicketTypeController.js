@@ -108,3 +108,9 @@ exports.checkInTicket = async (req, res, next) => {
     next(err);
   }
 };
+// Thêm vào controllers/adminTicketController.js
+exports.approveOrder = async (req, res) => {
+    const { orderId } = req.params;
+    await Order.findByIdAndUpdate(orderId, { status: 'paid' });
+    res.json({ message: "Đã duyệt đơn hàng thành công!" });
+};
