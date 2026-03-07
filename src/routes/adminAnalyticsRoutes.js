@@ -14,4 +14,4 @@ router.get("/revenue", getRevenueByEvent);
 router.get("/tickets", getTicketStats);
 router.get("/checkins", getCheckinStats);
 
-module.exports = router;
+module.exports = router
