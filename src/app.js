@@ -7,8 +7,14 @@ const errorHandler = require("./middleware/errorMiddleware");
 const app = express();
 
 // 1. Cấu hình Middleware cơ bản
-app.use(cors());
-app.use(express.json()); // Đã đặt đúng chỗ để đọc dữ liệu từ PayOS
+app.use(cors({
+  origin: [
+    'https://event-ticket-mangement-axvt.vercel.app',
+    'http://localhost:3000'
+  ],
+  credentials: true
+}));
+app.use(express.json());
 
 if (process.env.NODE_ENV !== "test") {
   app.use((req, res, next) => {
@@ -17,8 +23,7 @@ if (process.env.NODE_ENV !== "test") {
   });
 }
 
-// 2. ĐĂNG KÝ ROUTE THANH TOÁN (BẠN ĐANG THIẾU DÒNG NÀY)
-// Đảm bảo file ./routes/paymentRoutes đã tồn tại
+// 2. ĐĂNG KÝ ROUTE THANH TOÁN
 app.use("/api/payments", require("./routes/paymentRoutes")); 
 
 // 3. CÁC ROUTE HỆ THỐNG KHÁC
