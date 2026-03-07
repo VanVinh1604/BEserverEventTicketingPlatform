@@ -65,7 +65,8 @@ exports.createPayOSLink = async (req, res) => {
 
         // Tạo mã orderCode 6 chữ số
         const orderCode = Number(String(Date.now()).slice(-6));
-
+        console.log("💰 totalAmount:", order.totalAmount);
+        console.log("📦 Order:", JSON.stringify(order, null, 2));
         // Payload cho PayOS v2
         const paymentData = {
             orderCode: orderCode,
