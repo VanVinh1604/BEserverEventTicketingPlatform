@@ -33,25 +33,10 @@ const generateTicketEmail = (order) => {
       padding: 40px 30px;
       text-align: center;
     }
-    .header h1 {
-      margin: 0;
-      color: #ffffff;
-      font-size: 28px;
-      font-weight: 700;
-    }
-    .header p {
-      margin: 10px 0 0;
-      color: rgba(255, 255, 255, 0.9);
-      font-size: 16px;
-    }
-    .content {
-      padding: 40px 30px;
-    }
-    .greeting {
-      font-size: 18px;
-      color: #111827;
-      margin-bottom: 20px;
-    }
+    .header h1 { margin: 0; color: #ffffff; font-size: 28px; font-weight: 700; }
+    .header p { margin: 10px 0 0; color: rgba(255,255,255,0.9); font-size: 16px; }
+    .content { padding: 40px 30px; }
+    .greeting { font-size: 18px; color: #111827; margin-bottom: 20px; }
     .success-badge {
       display: inline-block;
       background-color: #dcfce7;
@@ -74,40 +59,18 @@ const generateTicketEmail = (order) => {
       padding: 12px 0;
       border-bottom: 1px solid #e5e7eb;
     }
-    .order-info-row:last-child {
-      border-bottom: none;
-      padding-bottom: 0;
-    }
-    .order-info-label {
-      color: #6b7280;
-      font-size: 14px;
-    }
-    .order-info-value {
-      color: #111827;
-      font-weight: 600;
-      font-size: 14px;
-      text-align: right;
-    }
+    .order-info-row:last-child { border-bottom: none; padding-bottom: 0; }
+    .order-info-label { color: #6b7280; font-size: 14px; }
+    .order-info-value { color: #111827; font-weight: 600; font-size: 14px; text-align: right; }
     .event-card {
       background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
       border-radius: 12px;
       padding: 24px;
       margin: 24px 0;
     }
-    .event-card h2 {
-      margin: 0 0 8px;
-      color: #92400e;
-      font-size: 20px;
-      font-weight: 700;
-    }
-    .event-card p {
-      margin: 4px 0;
-      color: #78350f;
-      font-size: 14px;
-    }
-    .ticket-list {
-      margin: 24px 0;
-    }
+    .event-card h2 { margin: 0 0 8px; color: #92400e; font-size: 20px; font-weight: 700; }
+    .event-card p { margin: 4px 0; color: #78350f; font-size: 14px; }
+    .ticket-list { margin: 24px 0; }
     .ticket-item {
       background-color: #f9fafb;
       border-left: 4px solid #ea580c;
@@ -115,16 +78,26 @@ const generateTicketEmail = (order) => {
       padding: 16px;
       margin-bottom: 12px;
     }
-    .ticket-item h3 {
-      margin: 0 0 8px;
-      color: #111827;
-      font-size: 16px;
-      font-weight: 600;
+    .ticket-item h3 { margin: 0 0 8px; color: #111827; font-size: 16px; font-weight: 600; }
+    .ticket-item p { margin: 4px 0; color: #6b7280; font-size: 14px; }
+    .qr-wrapper {
+      text-align: center;
+      margin-top: 16px;
+      padding-top: 16px;
+      border-top: 1px dashed #e5e7eb;
     }
-    .ticket-item p {
-      margin: 4px 0;
-      color: #6b7280;
-      font-size: 14px;
+    .qr-wrapper img {
+      width: 160px;
+      height: 160px;
+      border-radius: 10px;
+      border: 4px solid #ea580c;
+      padding: 4px;
+      background: white;
+    }
+    .qr-wrapper p {
+      font-size: 12px;
+      color: #9ca3af;
+      margin-top: 8px;
     }
     .cta-button {
       display: inline-block;
@@ -144,20 +117,9 @@ const generateTicketEmail = (order) => {
       text-align: center;
       border-top: 1px solid #e5e7eb;
     }
-    .footer p {
-      margin: 8px 0;
-      color: #6b7280;
-      font-size: 13px;
-    }
-    .footer a {
-      color: #ea580c;
-      text-decoration: none;
-    }
-    .divider {
-      height: 1px;
-      background-color: #e5e7eb;
-      margin: 24px 0;
-    }
+    .footer p { margin: 8px 0; color: #6b7280; font-size: 13px; }
+    .footer a { color: #ea580c; text-decoration: none; }
+    .divider { height: 1px; background-color: #e5e7eb; margin: 24px 0; }
   </style>
 </head>
 <body>
@@ -174,9 +136,7 @@ const generateTicketEmail = (order) => {
         Xin chào <strong>${customerName}</strong>,
       </div>
 
-      <div class="success-badge">
-        ✓ Thanh toán hoàn tất
-      </div>
+      <div class="success-badge">✓ Thanh toán hoàn tất</div>
 
       <p style="color: #4b5563; line-height: 1.6;">
         Đơn hàng của bạn đã được xác nhận thành công. Dưới đây là thông tin chi tiết về vé của bạn.
@@ -218,6 +178,13 @@ const generateTicketEmail = (order) => {
             <p><strong>Mã vé:</strong> ${ticket._id.toString().slice(-12).toUpperCase()}</p>
             <p><strong>Giá:</strong> ${formatPrice(ticket.price || ticket.ticketType?.price)}</p>
             <p><strong>Trạng thái:</strong> <span style="color: #16a34a;">✓ Đã kích hoạt</span></p>
+            <div class="qr-wrapper">
+              <img
+                src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(ticket.qrCode || ticket._id.toString())}"
+                alt="QR Code vé #${idx + 1}"
+              />
+              <p>Quét mã QR này để check-in tại sự kiện</p>
+            </div>
           </div>
         `).join('')}
       </div>
@@ -225,7 +192,7 @@ const generateTicketEmail = (order) => {
       <div class="divider"></div>
 
       <p style="color: #4b5563; line-height: 1.6; text-align: center;">
-        Vui lòng truy cập trang <strong>Vé của tôi</strong> để xem mã QR check-in.
+        Vui lòng truy cập trang <strong>Vé của tôi</strong> để xem chi tiết.
       </p>
 
       <center>
