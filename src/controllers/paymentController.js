@@ -1,306 +1,243 @@
 const stripe = require('../config/stripe');
 const payos = require('../config/payos');
 const Order = require('../models/Order');
-
+const { fulfillOrder, cancelOrder } = require('./orderController');
 
 // 1. TẠO SESSION STRIPE
 exports.createCheckoutSession = async (req, res) => {
-    try {
-        const { orderId } = req.body;
-        const order = await Order.findById(orderId).populate('event');
-        
-        if (!order) {
-            return res.status(404).json({ message: "Không tìm thấy đơn hàng" });
-        }
+  try {
+    const { orderId } = req.body;
+    const order = await Order.findById(orderId).populate('event');
 
-        // ✅ VALIDATE: Stripe yêu cầu tối thiểu 50 cents (~12,500 VND)
-        const STRIPE_MIN_AMOUNT = 12500; // 12,500 VND
-        
-        if (order.totalAmount < STRIPE_MIN_AMOUNT) {
-            return res.status(400).json({ 
-                message: `Stripe yêu cầu số tiền tối thiểu ${new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(STRIPE_MIN_AMOUNT)}. Vui lòng sử dụng phương thức PayOS cho đơn hàng nhỏ.`,
-                suggestPayOS: true
-            });
-        }
-
-        const session = await stripe.checkout.sessions.create({
-            payment_method_types: ['card'],
-            line_items: [{
-                price_data: {
-                    currency: 'vnd',
-                    product_data: { 
-                        name: `Vé sự kiện: ${order.event?.title || 'Sự kiện'}` 
-                    },
-                    unit_amount: order.totalAmount,
-                },
-                quantity: 1,
-            }],
-            mode: 'payment',
-            success_url: `${process.env.CLIENT_URL}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
-            cancel_url: `${process.env.CLIENT_URL}/payment-fail`,
-            metadata: { orderId: order._id.toString() },
-        });
-
-        res.json({ url: session.url });
-    } catch (error) {
-        console.error("❌ Stripe Error:", error);
-        res.status(500).json({ error: error.message });
+    if (!order) {
+      return res.status(404).json({ message: "Không tìm thấy đơn hàng" });
     }
+
+    const STRIPE_MIN_AMOUNT = 12500;
+    if (order.totalAmount < STRIPE_MIN_AMOUNT) {
+      return res.status(400).json({
+        message: `Stripe yêu cầu số tiền tối thiểu ${new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(STRIPE_MIN_AMOUNT)}. Vui lòng dùng PayOS.`,
+        suggestPayOS: true
+      });
+    }
+
+    const session = await stripe.checkout.sessions.create({
+      payment_method_types: ['card'],
+      line_items: [{
+        price_data: {
+          currency: 'vnd',
+          product_data: { name: `Vé sự kiện: ${order.event?.title || 'Sự kiện'}` },
+          unit_amount: order.totalAmount,
+        },
+        quantity: 1,
+      }],
+      mode: 'payment',
+      success_url: `${process.env.CLIENT_URL}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${process.env.CLIENT_URL}/payment-fail?order_id=${orderId}`,
+      metadata: { orderId: order._id.toString() },
+      // Stripe tự expire session sau 30 phút
+      expires_at: Math.floor(Date.now() / 1000) + 30 * 60,
+    });
+
+    res.json({ url: session.url });
+  } catch (error) {
+    console.error("❌ Stripe Error:", error);
+    res.status(500).json({ error: error.message });
+  }
 };
 
-// 2. TẠO LINK PAYOS (V2 - CÚ PHÁP ĐÚNG)
+// 2. TẠO LINK PAYOS
 exports.createPayOSLink = async (req, res) => {
-    try {
-        const { orderId } = req.body;
-        
-        if (!orderId) {
-            return res.status(400).json({ message: "Thiếu orderId" });
-        }
+  try {
+    const { orderId } = req.body;
 
-        const order = await Order.findById(orderId);
-        
-        if (!order) {
-            return res.status(404).json({ message: "Không tìm thấy đơn hàng" });
-        }
-
-        // Tạo mã orderCode 6 chữ số
-        const orderCode = Number(String(Date.now()).slice(-6));
-        console.log("💰 totalAmount:", order.totalAmount);
-        console.log("📦 Order:", JSON.stringify(order, null, 2));
-        // Payload cho PayOS v2
-        const paymentData = {
-            orderCode: orderCode,
-            amount: order.totalAmount,
-            description: `DH ${orderId.slice(-8)}`, // Tối đa 25 ký tự
-            returnUrl: `${process.env.CLIENT_URL}/payment-success`,
-            cancelUrl: `${process.env.CLIENT_URL}/payment-fail`,
-        };
-
-        console.log("📤 Đang gửi request tới PayOS:", paymentData);
-
-        // ✅ CÚ PHÁP ĐÚNG V2: payos.paymentRequests.create()
-        const paymentLink = await payos.paymentRequests.create(paymentData);
-
-        console.log("✅ PayOS Response:", paymentLink);
-
-        // Lưu paymentCode vào order
-        const updatedOrder = await Order.findByIdAndUpdate(orderId, { 
-            paymentCode: orderCode 
-        }, { new: true });
-
-        console.log("💾 Order sau khi lưu paymentCode:", {
-            orderId: updatedOrder._id,
-            paymentCode: updatedOrder.paymentCode,
-            status: updatedOrder.status
-        });
-
-        // Trả về checkout URL
-        res.json({ 
-            url: paymentLink.checkoutUrl,
-            orderCode: orderCode
-        });
-
-    } catch (error) {
-        console.error("❌ LỖI PAYOS:", error);
-        console.error("Stack:", error.stack);
-        res.status(500).json({ 
-            error: error.message,
-            details: error.stack 
-        });
+    if (!orderId) {
+      return res.status(400).json({ message: "Thiếu orderId" });
     }
+
+    const order = await Order.findById(orderId);
+    if (!order) {
+      return res.status(404).json({ message: "Không tìm thấy đơn hàng" });
+    }
+
+    const orderCode = Number(String(Date.now()).slice(-6));
+
+    const paymentData = {
+      orderCode,
+      amount: order.totalAmount,
+      description: `DH ${orderId.slice(-8)}`,
+      returnUrl: `${process.env.CLIENT_URL}/payment-success`,
+      cancelUrl: `${process.env.CLIENT_URL}/payment-fail?order_id=${orderId}`,
+    };
+
+    const paymentLink = await payos.paymentRequests.create(paymentData);
+
+    await Order.findByIdAndUpdate(orderId, { paymentCode: orderCode });
+
+    res.json({ url: paymentLink.checkoutUrl, orderCode });
+  } catch (error) {
+    console.error("❌ LỖI PAYOS:", error);
+    res.status(500).json({ error: error.message });
+  }
 };
 
 // 3. WEBHOOK PAYOS
 exports.handlePayOSWebhook = async (req, res) => {
-    try {
-        // Respond ngay để PayOS không retry
-        res.status(200).json({ success: true }); 
+  try {
+    res.status(200).json({ success: true });
 
-        const webhookData = req.body;
-        console.log("📨 Nhận webhook từ PayOS:", JSON.stringify(webhookData, null, 2));
+    const webhookData = req.body;
+    console.log("📨 PayOS webhook:", JSON.stringify(webhookData, null, 2));
 
-        if (webhookData.code === "00") {
-            const data = webhookData.data;
-            const orderCode = data.orderCode;
+    if (webhookData.code === "00") {
+      const orderCode = webhookData.data?.orderCode;
+      const order = await Order.findOne({ paymentCode: orderCode });
 
-            console.log(`🔍 Đang tìm order với paymentCode: ${orderCode}`);
+      if (!order) {
+        console.log(`⚠️ Không tìm thấy order với paymentCode: ${orderCode}`);
+        return;
+      }
 
-            // Tìm order
-            const order = await Order.findOne({ paymentCode: orderCode })
-                .populate('event')
-                .populate({ path: 'tickets', populate: { path: 'ticketType' } });
+      // Tạo Ticket + cập nhật status paid
+      const fulfilledOrder = await fulfillOrder(order._id.toString());
+      console.log(`✅ PayOS: Order ${order._id} fulfilled!`);
 
-            if (!order) {
-                console.log(`⚠️ PayOS: Không tìm thấy order với paymentCode ${orderCode}`);
-                console.log(`📋 Tất cả orders hiện có:`, await Order.find({}).select('_id paymentCode status'));
-                return;
-            }
-
-            console.log(`✅ Tìm thấy order: ${order._id}, status hiện tại: ${order.status}`);
-
-            // Update status
-            order.status = 'paid';
-            await order.save();
-
-            console.log(`✅ PayOS: Đơn hàng ${order._id} (paymentCode: ${orderCode}) đã được cập nhật thành PAID!`);
-
-            // ✅ GỬI EMAIL SAU KHI THANH TOÁN THÀNH CÔNG
-            if (order.customerInfo?.email) {
-                try {
-                    const { generateTicketEmail } = require('../utils/emailTemplates');
-                    const sendEmail = require('../utils/sendEmail');
-
-                    await sendEmail({
-                        email: order.customerInfo.email,
-                        subject: '🎉 Xác nhận đặt vé thành công - TicketHub',
-                        html: generateTicketEmail(order),
-                    });
-
-                    console.log(`📧 Đã gửi email xác nhận đến ${order.customerInfo.email}`);
-                } catch (emailError) {
-                    console.error('❌ Lỗi gửi email:', emailError.message);
-                }
-            }
-        } else {
-            console.log(`⚠️ Webhook không thành công. Code: ${webhookData.code}`);
+      // Gửi email
+      if (fulfilledOrder?.customerInfo?.email) {
+        try {
+          const { generateTicketEmail } = require('../utils/emailTemplates');
+          const sendEmail = require('../utils/sendEmail');
+          await sendEmail({
+            email: fulfilledOrder.customerInfo.email,
+            subject: '🎉 Xác nhận đặt vé thành công - TicketHub',
+            html: generateTicketEmail(fulfilledOrder),
+          });
+          console.log(`📧 Email gửi đến ${fulfilledOrder.customerInfo.email}`);
+        } catch (emailError) {
+          console.error('❌ Lỗi gửi email:', emailError.message);
         }
-    } catch (error) {
-        console.error("❌ Webhook PayOS Error:", error.message);
-        console.error("Stack:", error.stack);
+      }
+    } else {
+      // Thanh toán thất bại → release vé
+      const orderCode = webhookData.data?.orderCode;
+      if (orderCode) {
+        const order = await Order.findOne({ paymentCode: orderCode });
+        if (order) {
+          await cancelOrder(order._id.toString());
+          console.log(`🔄 PayOS: Order ${order._id} cancelled, vé đã trả lại`);
+        }
+      }
     }
+  } catch (error) {
+    console.error("❌ Webhook PayOS Error:", error.message);
+  }
 };
 
 // 4. WEBHOOK STRIPE
 exports.handleWebhook = async (req, res) => {
-    const sig = req.headers['stripe-signature'];
-    let event;
+  const sig = req.headers['stripe-signature'];
+  let event;
 
-    try {
-        event = stripe.webhooks.constructEvent(
-            req.body, 
-            sig, 
-            process.env.STRIPE_WEBHOOK_SECRET
-        );
-    } catch (err) {
-        console.error("❌ Stripe Webhook Error:", err.message);
-        return res.status(400).send(`Webhook Error: ${err.message}`);
-    }
+  try {
+    event = stripe.webhooks.constructEvent(
+      req.body,
+      sig,
+      process.env.STRIPE_WEBHOOK_SECRET
+    );
+  } catch (err) {
+    console.error("❌ Stripe Webhook Error:", err.message);
+    return res.status(400).send(`Webhook Error: ${err.message}`);
+  }
 
-    if (event.type === 'checkout.session.completed') {
-        const session = event.data.object;
-        const orderId = session.metadata.orderId;
+  if (event.type === 'checkout.session.completed') {
+    const session = event.data.object;
+    const orderId = session.metadata.orderId;
 
-        const order = await Order.findByIdAndUpdate(orderId, { status: 'paid' }, { new: true })
-            .populate('event')
-            .populate({ path: 'tickets', populate: { path: 'ticketType' } });
+    if (session.payment_status === 'paid') {
+      try {
+        const fulfilledOrder = await fulfillOrder(orderId);
+        console.log(`✅ Stripe: Order ${orderId} fulfilled!`);
 
-        console.log(`✅ Stripe: Đơn hàng ${orderId} đã thanh toán!`);
-
-        // ✅ GỬI EMAIL SAU KHI THANH TOÁN THÀNH CÔNG
-        if (order && order.customerInfo?.email) {
-            try {
-                const { generateTicketEmail } = require('../utils/emailTemplates');
-                const sendEmail = require('../utils/sendEmail');
-
-                await sendEmail({
-                    email: order.customerInfo.email,
-                    subject: '🎉 Xác nhận đặt vé thành công - TicketHub',
-                    html: generateTicketEmail(order),
-                });
-
-                console.log(`📧 Đã gửi email xác nhận đến ${order.customerInfo.email}`);
-            } catch (emailError) {
-                console.error('❌ Lỗi gửi email:', emailError.message);
-            }
+        if (fulfilledOrder?.customerInfo?.email) {
+          const { generateTicketEmail } = require('../utils/emailTemplates');
+          const sendEmail = require('../utils/sendEmail');
+          await sendEmail({
+            email: fulfilledOrder.customerInfo.email,
+            subject: '🎉 Xác nhận đặt vé thành công - TicketHub',
+            html: generateTicketEmail(fulfilledOrder),
+          });
+          console.log(`📧 Email gửi đến ${fulfilledOrder.customerInfo.email}`);
         }
+      } catch (err) {
+        console.error("❌ fulfillOrder error:", err.message);
+      }
     }
-    
-    res.json({ received: true });
+  }
+
+  // Stripe session hết hạn → release vé
+  if (event.type === 'checkout.session.expired') {
+    const session = event.data.object;
+    const orderId = session.metadata.orderId;
+    if (orderId) {
+      await cancelOrder(orderId);
+      console.log(`🔄 Stripe session expired: Order ${orderId} cancelled`);
+    }
+  }
+
+  res.json({ received: true });
 };
-// Thêm vào paymentController.js
 
-/// 5. VERIFY STRIPE SESSION VÀ UPDATE ORDER
+// 5. VERIFY STRIPE SESSION (fallback nếu webhook chưa kịp chạy)
 exports.verifyStripeSession = async (req, res) => {
-    try {
-        const { session_id } = req.body;
-        
-        console.log("🔍 Đang verify Stripe session:", session_id);
-        
-        if (!session_id) {
-            return res.status(400).json({ message: "Thiếu session_id" });
-        }
+  try {
+    const { session_id } = req.body;
 
-        // Lấy thông tin session từ Stripe
-        const session = await stripe.checkout.sessions.retrieve(session_id);
-        
-        console.log("📋 Stripe Session:", {
-            id: session.id,
-            payment_status: session.payment_status,
-            amount_total: session.amount_total,
-            metadata: session.metadata
-        });
-
-        // Kiểm tra payment_status
-        if (session.payment_status === 'paid') {
-            const orderId = session.metadata.orderId;
-            
-            if (!orderId) {
-                return res.status(400).json({ message: "Không tìm thấy orderId trong metadata" });
-            }
-
-            console.log(`💾 Đang update order ${orderId} thành paid...`);
-
-            // Update order status
-            const updatedOrder = await Order.findByIdAndUpdate(
-                orderId,
-                { status: 'paid' },
-                { new: true }
-            ).populate('event').populate({ path: 'tickets', populate: { path: 'ticketType' } });
-
-            if (!updatedOrder) {
-                return res.status(404).json({ message: "Không tìm thấy order" });
-            }
-
-            console.log(`✅ Stripe: Order ${orderId} đã được verify và update thành paid!`);
-
-            // ✅ GỬI EMAIL SAU KHI VERIFY THÀNH CÔNG
-            if (updatedOrder.customerInfo?.email) {
-                try {
-                    const { generateTicketEmail } = require('../utils/emailTemplates');
-                    const sendEmail = require('../utils/sendEmail');
-
-                    await sendEmail({
-                        email: updatedOrder.customerInfo.email,
-                        subject: '🎉 Xác nhận đặt vé thành công - TicketHub',
-                        html: generateTicketEmail(updatedOrder),
-                    });
-
-                    console.log(`📧 Đã gửi email xác nhận đến ${updatedOrder.customerInfo.email}`);
-                } catch (emailError) {
-                    console.error('❌ Lỗi gửi email:', emailError.message);
-                }
-            }
-
-            return res.json({ 
-                success: true, 
-                message: "Thanh toán thành công",
-                data: updatedOrder 
-            });
-        } else {
-            console.log(`⚠️ Payment status: ${session.payment_status}`);
-            return res.status(400).json({ 
-                success: false,
-                message: "Thanh toán chưa hoàn tất",
-                payment_status: session.payment_status 
-            });
-        }
-
-    } catch (error) {
-        console.error("❌ Verify Stripe Error:", error.message);
-        console.error("Stack:", error.stack);
-        res.status(500).json({ 
-            success: false,
-            error: error.message 
-        });
+    if (!session_id) {
+      return res.status(400).json({ message: "Thiếu session_id" });
     }
+
+    const session = await stripe.checkout.sessions.retrieve(session_id);
+
+    if (session.payment_status === 'paid') {
+      const orderId = session.metadata.orderId;
+
+      if (!orderId) {
+        return res.status(400).json({ message: "Không tìm thấy orderId" });
+      }
+
+      // fulfillOrder tự xử lý idempotent (nếu đã paid thì skip)
+      const fulfilledOrder = await fulfillOrder(orderId);
+      console.log(`✅ Stripe verify: Order ${orderId} fulfilled!`);
+
+      // Gửi email nếu chưa gửi (webhook có thể đã gửi rồi)
+      if (fulfilledOrder?.customerInfo?.email && fulfilledOrder.status === 'paid') {
+        try {
+          const { generateTicketEmail } = require('../utils/emailTemplates');
+          const sendEmail = require('../utils/sendEmail');
+          await sendEmail({
+            email: fulfilledOrder.customerInfo.email,
+            subject: '🎉 Xác nhận đặt vé thành công - TicketHub',
+            html: generateTicketEmail(fulfilledOrder),
+          });
+        } catch (emailError) {
+          console.error('❌ Lỗi gửi email:', emailError.message);
+        }
+      }
+
+      return res.json({
+        success: true,
+        message: "Thanh toán thành công",
+        data: fulfilledOrder
+      });
+    } else {
+      return res.status(400).json({
+        success: false,
+        message: "Thanh toán chưa hoàn tất",
+        payment_status: session.payment_status
+      });
+    }
+  } catch (error) {
+    console.error("❌ Verify Stripe Error:", error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
 };

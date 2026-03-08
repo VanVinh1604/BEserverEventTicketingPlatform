@@ -15,11 +15,10 @@ const orderSchema = new mongoose.Schema({
     default: "pending",
   },
 
-  // ✅ THÊM FIELD NÀY
   paymentCode: {
     type: Number,
     required: false,
-    index: true,  // Tạo index để tìm kiếm nhanh
+    index: true,
   },
 
   paymentMethod: {
@@ -33,6 +32,14 @@ const orderSchema = new mongoose.Schema({
     email: String,
     phone: String,
   },
+
+  // ✅ Lưu thông tin vé chờ tạo sau khi thanh toán xong
+  pendingItems: [
+    {
+      ticketTypeId: { type: mongoose.Schema.Types.ObjectId, ref: "TicketType" },
+      quantity: Number,
+    }
+  ],
 
 }, { timestamps: true });
 
