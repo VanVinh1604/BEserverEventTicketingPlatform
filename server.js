@@ -2,7 +2,7 @@ require("dotenv").config();
 const express = require("express"); 
 const app = require("./src/app");
 const connectDB = require("./src/config/db");
-
+require('./cronJobs'); // thêm dòng này
 // 1. PHẢI CÓ DÒNG NÀY ĐẦU TIÊN ĐỂ ĐỌC DỮ LIỆU THANH TOÁN
 app.use(express.json()); 
 
