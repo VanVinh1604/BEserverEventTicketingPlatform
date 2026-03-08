@@ -16,7 +16,7 @@ exports.createCheckoutSession = async (req, res) => {
     const STRIPE_MIN_AMOUNT = 12500;
     if (order.totalAmount < STRIPE_MIN_AMOUNT) {
       return res.status(400).json({
-        message: `Stripe yêu cầu số tiền tối thiểu ${new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(STRIPE_MIN_AMOUNT)}. Vui lòng dùng PayOS.`,
+        message: `Stripe yêu cầu tối thiểu ${new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(STRIPE_MIN_AMOUNT)}. Vui lòng dùng PayOS.`,
         suggestPayOS: true
       });
     }
@@ -35,8 +35,7 @@ exports.createCheckoutSession = async (req, res) => {
       success_url: `${process.env.CLIENT_URL}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${process.env.CLIENT_URL}/payment-fail?order_id=${orderId}`,
       metadata: { orderId: order._id.toString() },
-      // Stripe tự expire session sau 30 phút
-      expires_at: Math.floor(Date.now() / 1000) + 30 * 60,
+      expires_at: Math.floor(Date.now() / 1000) + 30 * 60, // 30 phút
     });
 
     res.json({ url: session.url });
@@ -71,7 +70,6 @@ exports.createPayOSLink = async (req, res) => {
     };
 
     const paymentLink = await payos.paymentRequests.create(paymentData);
-
     await Order.findByIdAndUpdate(orderId, { paymentCode: orderCode });
 
     res.json({ url: paymentLink.checkoutUrl, orderCode });
@@ -98,11 +96,9 @@ exports.handlePayOSWebhook = async (req, res) => {
         return;
       }
 
-      // Tạo Ticket + cập nhật status paid
       const fulfilledOrder = await fulfillOrder(order._id.toString());
       console.log(`✅ PayOS: Order ${order._id} fulfilled!`);
 
-      // Gửi email
       if (fulfilledOrder?.customerInfo?.email) {
         try {
           const { generateTicketEmail } = require('../utils/emailTemplates');
@@ -124,7 +120,7 @@ exports.handlePayOSWebhook = async (req, res) => {
         const order = await Order.findOne({ paymentCode: orderCode });
         if (order) {
           await cancelOrder(order._id.toString());
-          console.log(`🔄 PayOS: Order ${order._id} cancelled, vé đã trả lại`);
+          console.log(`🔄 PayOS: Order ${order._id} cancelled`);
         }
       }
     }
@@ -149,6 +145,7 @@ exports.handleWebhook = async (req, res) => {
     return res.status(400).send(`Webhook Error: ${err.message}`);
   }
 
+  // Thanh toán thành công
   if (event.type === 'checkout.session.completed') {
     const session = event.data.object;
     const orderId = session.metadata.orderId;
@@ -174,7 +171,7 @@ exports.handleWebhook = async (req, res) => {
     }
   }
 
-  // Stripe session hết hạn → release vé
+  // Session hết hạn → release vé
   if (event.type === 'checkout.session.expired') {
     const session = event.data.object;
     const orderId = session.metadata.orderId;
@@ -187,7 +184,7 @@ exports.handleWebhook = async (req, res) => {
   res.json({ received: true });
 };
 
-// 5. VERIFY STRIPE SESSION (fallback nếu webhook chưa kịp chạy)
+// 5. VERIFY STRIPE SESSION (fallback nếu webhook chưa kịp)
 exports.verifyStripeSession = async (req, res) => {
   try {
     const { session_id } = req.body;
@@ -205,12 +202,11 @@ exports.verifyStripeSession = async (req, res) => {
         return res.status(400).json({ message: "Không tìm thấy orderId" });
       }
 
-      // fulfillOrder tự xử lý idempotent (nếu đã paid thì skip)
+      // fulfillOrder tự xử lý idempotent
       const fulfilledOrder = await fulfillOrder(orderId);
       console.log(`✅ Stripe verify: Order ${orderId} fulfilled!`);
 
-      // Gửi email nếu chưa gửi (webhook có thể đã gửi rồi)
-      if (fulfilledOrder?.customerInfo?.email && fulfilledOrder.status === 'paid') {
+      if (fulfilledOrder?.customerInfo?.email) {
         try {
           const { generateTicketEmail } = require('../utils/emailTemplates');
           const sendEmail = require('../utils/sendEmail');

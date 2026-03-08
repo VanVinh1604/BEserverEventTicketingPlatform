@@ -26,34 +26,27 @@ exports.buyTickets = async (req, res, next) => {
 
     let totalAmount = 0;
     let finalEventId = eventId;
-    const lockedItems = []; // track những gì đã lock để rollback nếu cần
+    const lockedItems = [];
 
     // ── ATOMIC LOCK từng loại vé ──────────────────────────────
     for (const item of items) {
       const updated = await TicketType.findOneAndUpdate(
         {
           _id: item.ticketTypeId,
-          // Chỉ update nếu còn đủ vé (atomic check + update)
-          $expr: {
-            $gte: [
-              { $ifNull: ["$remaining", { $subtract: ["$quantity", { $ifNull: ["$sold", 0] }] }] },
-              item.quantity
-            ]
-          }
+          remaining: { $gte: item.quantity } // chỉ update nếu còn đủ vé
         },
-        { $inc: { remaining: -item.quantity, sold: item.quantity } },
+        { $inc: { remaining: -item.quantity } },
         { new: true }
       );
 
       if (!updated) {
-        // Rollback các vé đã lock trước đó
+        // Rollback tất cả vé đã lock trước đó
         for (const locked of lockedItems) {
           await TicketType.findByIdAndUpdate(
             locked.ticketTypeId,
-            { $inc: { remaining: locked.quantity, sold: -locked.quantity } }
+            { $inc: { remaining: locked.quantity } }
           );
         }
-        // Lấy tên vé để báo lỗi rõ hơn
         const tt = await TicketType.findById(item.ticketTypeId);
         return next(new AppError(
           `Vé "${tt?.name || item.ticketTypeId}" đã hết hoặc không đủ số lượng!`,
@@ -67,14 +60,13 @@ exports.buyTickets = async (req, res, next) => {
     }
 
     // ── TẠO ORDER (pending) ───────────────────────────────────
-    // Chưa tạo Ticket ở đây — đợi thanh toán xong
+    // Chưa tạo Ticket — đợi thanh toán xong mới tạo trong fulfillOrder
     const order = await Order.create({
       user: userId,
       event: finalEventId,
       customerInfo,
       totalAmount,
       status: "pending",
-      // Lưu items để sau thanh toán biết tạo Ticket gì
       pendingItems: items.map(i => ({
         ticketTypeId: i.ticketTypeId,
         quantity: i.quantity,
@@ -89,21 +81,29 @@ exports.buyTickets = async (req, res, next) => {
   }
 };
 
-// ── GỌI HÀM NÀY SAU KHI THANH TOÁN THÀNH CÔNG ───────────────
+// ── GỌI SAU KHI THANH TOÁN THÀNH CÔNG ───────────────────────
 exports.fulfillOrder = async (orderId) => {
   const order = await Order.findById(orderId);
-  if (!order || order.status === "paid") return;
+  if (!order) throw new Error(`Không tìm thấy order: ${orderId}`);
+
+  // Idempotent — nếu đã paid rồi thì trả về luôn, không tạo lại
+  if (order.status === "paid") {
+    return await Order.findById(orderId)
+      .populate("event")
+      .populate({ path: "tickets", populate: { path: "ticketType" } });
+  }
 
   const createdTicketIds = [];
 
   for (const item of order.pendingItems || []) {
+    const ticketType = await TicketType.findById(item.ticketTypeId);
     for (let i = 0; i < item.quantity; i++) {
       const ticket = await Ticket.create({
         order: order._id,
         user: order.user,
         event: order.event,
         ticketType: item.ticketTypeId,
-        price: (await TicketType.findById(item.ticketTypeId))?.price || 0,
+        price: ticketType?.price || 0,
         qrCode: uuidv4(),
         status: "active",
       });
@@ -115,23 +115,27 @@ exports.fulfillOrder = async (orderId) => {
   order.status = "paid";
   await order.save();
 
-  return order;
+  return await Order.findById(order._id)
+    .populate("event")
+    .populate({ path: "tickets", populate: { path: "ticketType" } });
 };
 
-// ── RELEASE VÉ KHI THANH TOÁN THẤT BẠI / HẾT HẠN ────────────
+// ── GỌI KHI THANH TOÁN THẤT BẠI / HẾT HẠN ──────────────────
 exports.cancelOrder = async (orderId) => {
   const order = await Order.findById(orderId);
   if (!order || order.status !== "pending") return;
 
+  // Trả vé về
   for (const item of order.pendingItems || []) {
     await TicketType.findByIdAndUpdate(
       item.ticketTypeId,
-      { $inc: { remaining: item.quantity, sold: -item.quantity } }
+      { $inc: { remaining: item.quantity } }
     );
   }
 
   order.status = "cancelled";
   await order.save();
+  console.log(`🔄 Order ${orderId} cancelled, vé đã được trả lại`);
   return order;
 };
 
