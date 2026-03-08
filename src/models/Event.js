@@ -7,6 +7,7 @@ const eventSchema = new mongoose.Schema({
   startDate: Date,
   endDate: Date,
   image: String,
+  category: String,
   status: {
     type: String,
     enum: ['active', 'ended', 'draft', 'cancelled'],

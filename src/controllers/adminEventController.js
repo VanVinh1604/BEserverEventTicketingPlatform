@@ -3,10 +3,12 @@ const TicketType = require("../models/TicketType");
 const APIFeatures = require("../middleware/apiFeatures");
 const AppError = require("../utils/AppError");
 
-// ✅ CREATE EVENT
 exports.createEvent = async (req, res, next) => {
   try {
-    const { title, description, location } = req.body;
+    console.log('req.body:', req.body);
+    console.log('req.file:', req.file);
+
+    const { title, description, location, category, startDate, endDate, status } = req.body;
     if (!title || !location) {
       return next(new AppError("Title and location are required", 400));
     }
@@ -15,6 +17,10 @@ exports.createEvent = async (req, res, next) => {
       title,
       description,
       location,
+      category,
+      startDate,
+      endDate,
+      status: status || 'active',
       image: imagePath,
       createdBy: req.user.id,
     });
