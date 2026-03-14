@@ -9,6 +9,7 @@ const app = express();
 // 1. Cấu hình Middleware cơ bản
 app.use(cors({
   origin: [
+    'https://event-ticket-mangement.vercel.app',
    'https://event-ticket-mangement-8s3y.vercel.app',
     'http://localhost:3000'
   ],
