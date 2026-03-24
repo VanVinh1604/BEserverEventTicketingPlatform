@@ -4,6 +4,37 @@ const Order = require("../models/Order");
 const Ticket = require("../models/Ticket");
 const AppError = require("../utils/AppError");
 
+const QUICK_RELEASE_TIMEOUT_MS = 30 * 1000;
+const STUCK_PAYMENT_TIMEOUT_MS = 15 * 60 * 1000;
+
+const populateOrderWithDetails = async (orderId) =>
+  Order.findById(orderId)
+    .populate("event")
+    .populate({ path: "tickets", populate: { path: "ticketType" } });
+
+const cancelPendingOrderById = async (orderId, reason = "manual_cancel") => {
+  const pendingOrder = await Order.findOneAndUpdate(
+    { _id: orderId, status: "pending" },
+    { $set: { status: "cancelled" } },
+    { new: false }
+  );
+
+  if (!pendingOrder) {
+    const existingOrder = await Order.findById(orderId);
+    return { cancelled: false, order: existingOrder };
+  }
+
+  for (const item of pendingOrder.pendingItems || []) {
+    await TicketType.findByIdAndUpdate(item.ticketTypeId, {
+      $inc: { remaining: item.quantity },
+    });
+  }
+
+  const cancelledOrder = await Order.findById(orderId);
+  console.log(`🔄 Order ${orderId} cancelled (${reason}), vé đã được trả lại`);
+  return { cancelled: true, order: cancelledOrder };
+};
+
 exports.buyTickets = async (req, res, next) => {
   try {
     const userId = req.user.id;
@@ -88,15 +119,23 @@ exports.fulfillOrder = async (orderId) => {
 
   // Idempotent — nếu đã paid rồi thì trả về luôn, không tạo lại
   if (order.status === "paid") {
-    return await Order.findById(orderId)
-      .populate("event")
-      .populate({ path: "tickets", populate: { path: "ticketType" } });
+    return await populateOrderWithDetails(orderId);
+  }
+
+  if (order.status !== "pending") {
+    throw new Error(
+      `Order ${orderId} không ở trạng thái pending (hiện tại: ${order.status})`
+    );
   }
 
   const createdTicketIds = [];
 
   for (const item of order.pendingItems || []) {
     const ticketType = await TicketType.findById(item.ticketTypeId);
+    if (!ticketType) {
+      throw new Error(`Không tìm thấy loại vé: ${item.ticketTypeId}`);
+    }
+
     for (let i = 0; i < item.quantity; i++) {
       const ticket = await Ticket.create({
         order: order._id,
@@ -115,28 +154,136 @@ exports.fulfillOrder = async (orderId) => {
   order.status = "paid";
   await order.save();
 
-  return await Order.findById(order._id)
-    .populate("event")
-    .populate({ path: "tickets", populate: { path: "ticketType" } });
+  return await populateOrderWithDetails(order._id);
 };
 
 // ── GỌI KHI THANH TOÁN THẤT BẠI / HẾT HẠN ──────────────────
-exports.cancelOrder = async (orderId) => {
-  const order = await Order.findById(orderId);
-  if (!order || order.status !== "pending") return;
+exports.cancelOrder = async (orderId, reason = "manual_cancel") => {
+  const { order } = await cancelPendingOrderById(orderId, reason);
+  return order;
+};
 
-  // Trả vé về
-  for (const item of order.pendingItems || []) {
-    await TicketType.findByIdAndUpdate(
-      item.ticketTypeId,
-      { $inc: { remaining: item.quantity } }
+exports.cancelPendingOrder = async (req, res, next) => {
+  try {
+    const requestOrderId = req.params.orderId || req.body.orderId;
+    const reason = req.body.reason || "manual_cancel";
+    const requesterId = req.user?.id || req.user?._id;
+    const requesterRole = req.user?.role;
+
+    if (!requestOrderId) {
+      return next(new AppError("Thiếu orderId", 400));
+    }
+
+    const order = await Order.findById(requestOrderId);
+    if (!order) {
+      return next(new AppError("Không tìm thấy đơn hàng", 404));
+    }
+
+    const paymentInitiatedAgeMs = order.paymentInitiatedAt
+      ? Date.now() - new Date(order.paymentInitiatedAt).getTime()
+      : null;
+    const paymentCancelledAgeMs = order.paymentCancelledAt
+      ? Date.now() - new Date(order.paymentCancelledAt).getTime()
+      : null;
+
+    if (
+      reason === "unpaid_after_30_seconds" &&
+      order.paymentInitiatedAt &&
+      !order.paymentCancelledAt &&
+      paymentInitiatedAgeMs < STUCK_PAYMENT_TIMEOUT_MS
+    ) {
+      return res.status(200).json({
+        success: true,
+        message: "Đơn đã vào luồng thanh toán, sẽ tự huỷ sau 15 phút nếu chưa hoàn tất",
+        data: order,
+      });
+    }
+
+    if (
+      reason === "unpaid_after_30_seconds" &&
+      order.paymentCancelledAt &&
+      paymentCancelledAgeMs < QUICK_RELEASE_TIMEOUT_MS
+    ) {
+      return res.status(200).json({
+        success: true,
+        message: "Đơn vừa huỷ thanh toán, hệ thống sẽ hoàn vé trong vòng 30 giây",
+        data: order,
+      });
+    }
+
+    const isOwner = String(order.user) === String(requesterId);
+    const isAdmin = requesterRole === "admin";
+
+    if (!isOwner && !isAdmin) {
+      return next(new AppError("Bạn không có quyền hủy đơn này", 403));
+    }
+
+    const result = await cancelPendingOrderById(requestOrderId, reason);
+
+    if (!result.cancelled) {
+      return res.status(200).json({
+        success: true,
+        message: `Đơn hiện đã ở trạng thái ${result.order?.status || "không xác định"}`,
+        data: result.order,
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Đã hủy đơn pending và hoàn vé thành công",
+      data: result.order,
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+exports.cancelExpiredPendingOrders = async () => {
+  const now = Date.now();
+  const quickCutoff = new Date(now - QUICK_RELEASE_TIMEOUT_MS);
+  const stuckCutoff = new Date(now - STUCK_PAYMENT_TIMEOUT_MS);
+
+  const expiredOrders = await Order.find({
+    status: "pending",
+    $or: [
+      { paymentInitiatedAt: { $exists: false }, createdAt: { $lte: quickCutoff } },
+      { paymentInitiatedAt: null, createdAt: { $lte: quickCutoff } },
+      { paymentCancelledAt: { $lte: quickCutoff } },
+      {
+        $and: [
+          { paymentInitiatedAt: { $lte: stuckCutoff } },
+          {
+            $or: [
+              { paymentCancelledAt: { $exists: false } },
+              { paymentCancelledAt: null },
+            ],
+          },
+        ],
+      },
+    ],
+  }).select("_id paymentInitiatedAt paymentCancelledAt");
+
+  let cancelledCount = 0;
+
+  for (const pendingOrder of expiredOrders) {
+    const reason = pendingOrder.paymentCancelledAt
+      ? "cancelled_on_gateway_over_30_seconds"
+      : pendingOrder.paymentInitiatedAt
+      ? "pending_over_15_minutes"
+      : "unpaid_after_30_seconds";
+
+    const result = await cancelPendingOrderById(
+      pendingOrder._id.toString(),
+      reason
     );
+
+    if (result.cancelled) cancelledCount += 1;
   }
 
-  order.status = "cancelled";
-  await order.save();
-  console.log(`🔄 Order ${orderId} cancelled, vé đã được trả lại`);
-  return order;
+  return {
+    found: expiredOrders.length,
+    cancelled: cancelledCount,
+  };
 };
 
 exports.getMyOrders = async (req, res) => {

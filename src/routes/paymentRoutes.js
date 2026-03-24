@@ -8,6 +8,8 @@ router.post('/webhook', express.raw({type: 'application/json'}), paymentControll
 router.post('/verify-stripe-session', paymentController.verifyStripeSession);
 // PayOS (Banking & MoMo)
 router.post('/create-payos-link', paymentController.createPayOSLink);
+router.get('/cancel-return', paymentController.handlePaymentCancelReturn);
+router.post('/mark-cancelled', paymentController.markPaymentCancelled);
 // Trong file routes của bạn
 router.post('/payos-webhook', paymentController.handlePayOSWebhook);
 module.exports = router;

@@ -27,6 +27,16 @@ const orderSchema = new mongoose.Schema({
     required: false,
   },
 
+  paymentInitiatedAt: {
+    type: Date,
+    required: false,
+  },
+
+  paymentCancelledAt: {
+    type: Date,
+    required: false,
+  },
+
   customerInfo: {
     fullName: String,
     email: String,
