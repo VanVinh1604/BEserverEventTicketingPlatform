@@ -51,6 +51,11 @@ const orderSchema = new mongoose.Schema({
     }
   ],
 
+  cancelReason: {
+    type: String,
+    required: false,
+  },
+
 }, { timestamps: true });
 
 module.exports = mongoose.model("Order", orderSchema);

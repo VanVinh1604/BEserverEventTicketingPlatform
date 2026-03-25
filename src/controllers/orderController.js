@@ -12,28 +12,47 @@ const populateOrderWithDetails = async (orderId) =>
     .populate("event")
     .populate({ path: "tickets", populate: { path: "ticketType" } });
 
-const cancelPendingOrderById = async (orderId, reason = "manual_cancel") => {
-  const pendingOrder = await Order.findOneAndUpdate(
-    { _id: orderId, status: "pending" },
-    { $set: { status: "cancelled" } },
-    { new: false }
-  );
+/**
+ * Huỷ / hoàn tiền một đơn hàng.
+ * - pending  → cancelled  (hoàn vé remaining)
+ * - paid     → refunded   (không thay đổi remaining vì vé đã xuất)
+ * - các trạng thái khác   → bỏ qua (idempotent)
+ */
+const cancelOrRefundOrderById = async (orderId, reason = "manual_cancel") => {
+  const order = await Order.findById(orderId);
+  if (!order) return { cancelled: false, order: null };
 
-  if (!pendingOrder) {
-    const existingOrder = await Order.findById(orderId);
-    return { cancelled: false, order: existingOrder };
-  }
-
-  for (const item of pendingOrder.pendingItems || []) {
-    await TicketType.findByIdAndUpdate(item.ticketTypeId, {
-      $inc: { remaining: item.quantity },
+  if (order.status === "pending") {
+    // Hoàn vé cho đơn pending
+    for (const item of order.pendingItems || []) {
+      await TicketType.findByIdAndUpdate(item.ticketTypeId, {
+        $inc: { remaining: item.quantity },
+      });
+    }
+    await Order.findByIdAndUpdate(orderId, {
+      $set: { status: "cancelled", cancelReason: reason },
     });
+    console.log(`🔄 Order ${orderId} cancelled (${reason}), vé đã được trả lại`);
+    const updated = await Order.findById(orderId);
+    return { cancelled: true, order: updated };
   }
 
-  const cancelledOrder = await Order.findById(orderId);
-  console.log(`🔄 Order ${orderId} cancelled (${reason}), vé đã được trả lại`);
-  return { cancelled: true, order: cancelledOrder };
+  if (order.status === "paid") {
+    // Đánh dấu refunded (tiền hoàn qua cổng thanh toán xử lý ngoài hệ thống)
+    await Order.findByIdAndUpdate(orderId, {
+      $set: { status: "refunded", cancelReason: reason },
+    });
+    console.log(`💸 Order ${orderId} marked refunded (${reason})`);
+    const updated = await Order.findById(orderId);
+    return { cancelled: true, order: updated };
+  }
+
+  // cancelled / refunded / ... → idempotent
+  return { cancelled: false, order: order };
 };
+
+// Giữ tên cũ để cronJobs / các nơi import không bị break
+const cancelPendingOrderById = cancelOrRefundOrderById;
 
 exports.buyTickets = async (req, res, next) => {
   try {
@@ -169,6 +188,7 @@ exports.cancelPendingOrder = async (req, res, next) => {
     const reason = req.body.reason || "manual_cancel";
     const requesterId = req.user?.id || req.user?._id;
     const requesterRole = req.user?.role;
+    const isAdmin = requesterRole === "admin";
 
     if (!requestOrderId) {
       return next(new AppError("Thiếu orderId", 400));
@@ -179,43 +199,45 @@ exports.cancelPendingOrder = async (req, res, next) => {
       return next(new AppError("Không tìm thấy đơn hàng", 404));
     }
 
-    const paymentInitiatedAgeMs = order.paymentInitiatedAt
-      ? Date.now() - new Date(order.paymentInitiatedAt).getTime()
-      : null;
-    const paymentCancelledAgeMs = order.paymentCancelledAt
-      ? Date.now() - new Date(order.paymentCancelledAt).getTime()
-      : null;
-
-    if (
-      reason === "unpaid_after_30_seconds" &&
-      order.paymentInitiatedAt &&
-      !order.paymentCancelledAt &&
-      paymentInitiatedAgeMs < STUCK_PAYMENT_TIMEOUT_MS
-    ) {
-      return res.status(200).json({
-        success: true,
-        message: "Đơn đã vào luồng thanh toán, sẽ tự huỷ sau 15 phút nếu chưa hoàn tất",
-        data: order,
-      });
-    }
-
-    if (
-      reason === "unpaid_after_30_seconds" &&
-      order.paymentCancelledAt &&
-      paymentCancelledAgeMs < QUICK_RELEASE_TIMEOUT_MS
-    ) {
-      return res.status(200).json({
-        success: true,
-        message: "Đơn vừa huỷ thanh toán, hệ thống sẽ hoàn vé trong vòng 30 giây",
-        data: order,
-      });
-    }
-
     const isOwner = String(order.user) === String(requesterId);
-    const isAdmin = requesterRole === "admin";
 
     if (!isOwner && !isAdmin) {
       return next(new AppError("Bạn không có quyền hủy đơn này", 403));
+    }
+
+    // Admin bypass: bỏ qua giới hạn 30s/15m
+    if (!isAdmin) {
+      const paymentInitiatedAgeMs = order.paymentInitiatedAt
+        ? Date.now() - new Date(order.paymentInitiatedAt).getTime()
+        : null;
+      const paymentCancelledAgeMs = order.paymentCancelledAt
+        ? Date.now() - new Date(order.paymentCancelledAt).getTime()
+        : null;
+
+      if (
+        reason === "unpaid_after_30_seconds" &&
+        order.paymentInitiatedAt &&
+        !order.paymentCancelledAt &&
+        paymentInitiatedAgeMs < STUCK_PAYMENT_TIMEOUT_MS
+      ) {
+        return res.status(200).json({
+          success: true,
+          message: "Đơn đã vào luồng thanh toán, sẽ tự huỷ sau 15 phút nếu chưa hoàn tất",
+          data: order,
+        });
+      }
+
+      if (
+        reason === "unpaid_after_30_seconds" &&
+        order.paymentCancelledAt &&
+        paymentCancelledAgeMs < QUICK_RELEASE_TIMEOUT_MS
+      ) {
+        return res.status(200).json({
+          success: true,
+          message: "Đơn vừa huỷ thanh toán, hệ thống sẽ hoàn vé trong vòng 30 giây",
+          data: order,
+        });
+      }
     }
 
     const result = await cancelPendingOrderById(requestOrderId, reason);
@@ -228,9 +250,14 @@ exports.cancelPendingOrder = async (req, res, next) => {
       });
     }
 
+    const finalStatus = result.order?.status;
+    const msg = finalStatus === "refunded"
+      ? "Đã đánh dấu hoàn tiền đơn hàng thành công"
+      : "Đã hủy đơn và hoàn vé thành công";
+
     return res.status(200).json({
       success: true,
-      message: "Đã hủy đơn pending và hoàn vé thành công",
+      message: msg,
       data: result.order,
     });
   } catch (err) {

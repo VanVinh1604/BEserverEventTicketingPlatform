@@ -7,6 +7,7 @@ const {
   getEvents,
   updateEvent,
   deleteEvent,
+  cancelAndRefundEvent,
 } = require("../controllers/adminEventController");
 
 const upload = require("../middleware/uploadEventImage");
@@ -22,6 +23,7 @@ router.post(
 );
 
 router.get("/", getEvents);
+router.post("/:id/cancel-refund", cancelAndRefundEvent);
 router.put("/:id", upload.single("image"), updateEvent);
 router.delete("/:id", deleteEvent);
 

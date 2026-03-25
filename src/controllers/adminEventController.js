@@ -1,5 +1,6 @@
 const Event = require("../models/Event");
 const TicketType = require("../models/TicketType");
+const Order = require("../models/Order");
 const APIFeatures = require("../middleware/apiFeatures");
 const AppError = require("../utils/AppError");
 
@@ -112,6 +113,62 @@ exports.deleteEvent = async (req, res, next) => {
       return next(new AppError("Event not found", 404));
     }
     res.json({ success: true, message: "Event deleted" });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// ✅ CANCEL EVENT + REFUND (hoàn tiền / trả vé cho tất cả đơn liên quan)
+exports.cancelAndRefundEvent = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const reason = req.body?.reason || "event_cancelled_by_admin";
+
+    // 1. Đánh dấu event là cancelled
+    const event = await Event.findByIdAndUpdate(
+      id,
+      { status: "cancelled" },
+      { new: true }
+    );
+    if (!event) {
+      return next(new AppError("Event not found", 404));
+    }
+
+    // 2. Tìm tất cả đơn hàng liên quan chưa bị cancelled/refunded
+    const activeOrders = await Order.find({
+      event: id,
+      status: { $nin: ["cancelled", "refunded"] },
+    });
+
+    let refundedCount = 0;
+
+    for (const order of activeOrders) {
+      // Hoàn vé cho đơn pending (trả lại remaining)
+      if (order.status === "pending") {
+        for (const item of order.pendingItems || []) {
+          await TicketType.findByIdAndUpdate(item.ticketTypeId, {
+            $inc: { remaining: item.quantity },
+          });
+        }
+      }
+
+      // Chuyển trạng thái đơn sang refunded
+      await Order.findByIdAndUpdate(order._id, {
+        $set: { status: "refunded", cancelReason: reason },
+      });
+
+      refundedCount += 1;
+    }
+
+    return res.json({
+      success: true,
+      message: `Đã hủy sự kiện và xử lý ${refundedCount} đơn hàng`,
+      data: {
+        event,
+        refundedOrders: refundedCount,
+        impactedOrders: refundedCount,
+      },
+    });
   } catch (err) {
     next(err);
   }
