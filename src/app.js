@@ -11,6 +11,7 @@ app.use(cors({
   origin: [
     'https://event-ticket-mangement.vercel.app',
    'https://event-ticket-mangement-8s3y.vercel.app',
+    'https://event-ticket-mangement-axvt.vercel.app',
     'http://localhost:3000'
   ],
   credentials: true
