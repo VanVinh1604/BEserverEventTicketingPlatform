@@ -4,6 +4,27 @@ const Order = require("../models/Order");
 const APIFeatures = require("../middleware/apiFeatures");
 const AppError = require("../utils/AppError");
 
+const resolveImagePath = (file) => {
+  if (!file) return null;
+
+  if (typeof file.path === "string" && /^https?:\/\//i.test(file.path)) {
+    return file.path;
+  }
+
+  if (file.filename) {
+    return `/uploads/events/${file.filename}`;
+  }
+
+  if (typeof file.path === "string") {
+    const normalized = file.path.replace(/\\/g, "/");
+    const uploadIndex = normalized.lastIndexOf("/uploads/");
+    if (uploadIndex >= 0) return normalized.slice(uploadIndex);
+    return normalized.startsWith("/") ? normalized : `/${normalized}`;
+  }
+
+  return null;
+};
+
 exports.createEvent = async (req, res, next) => {
   try {
     console.log('req.body:', req.body);
@@ -13,7 +34,7 @@ exports.createEvent = async (req, res, next) => {
     if (!title || !location) {
       return next(new AppError("Title and location are required", 400));
     }
-    const imagePath = req.file ? req.file.path : null;
+    const imagePath = resolveImagePath(req.file);
     const event = await Event.create({
       title,
       description,
@@ -91,7 +112,7 @@ exports.updateEvent = async (req, res, next) => {
   try {
     const updateData = { ...req.body };
     if (req.file) {
-      updateData.image = req.file.path;
+      updateData.image = resolveImagePath(req.file);
     }
     const event = await Event.findByIdAndUpdate(req.params.id, updateData, {
       new: true,
