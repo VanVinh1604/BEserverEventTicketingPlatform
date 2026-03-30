@@ -4,6 +4,9 @@ const Order = require("../models/Order");
 const APIFeatures = require("../middleware/apiFeatures");
 const AppError = require("../utils/AppError");
 
+const getTicketTypeLabel = (ticketTypeDoc, fallbackId) =>
+  ticketTypeDoc?.name || String(fallbackId || "unknown_ticket_type");
+
 const resolveImagePath = (file) => {
   if (!file) return null;
 
@@ -161,15 +164,33 @@ exports.cancelAndRefundEvent = async (req, res, next) => {
       status: { $nin: ["cancelled", "refunded"] },
     });
 
+    console.log(
+      `[REFUND][EVENT] start event=${id} | title=${event.title || ""} | impactedOrders=${activeOrders.length} | reason=${reason}`
+    );
+
     let refundedCount = 0;
 
     for (const order of activeOrders) {
+      let refundedTickets = 0;
+
       // Hoàn vé cho đơn pending (trả lại remaining)
       if (order.status === "pending") {
         for (const item of order.pendingItems || []) {
+          const beforeTicketType = await TicketType.findById(item.ticketTypeId).select("name remaining");
+          const beforeRemaining = Number(beforeTicketType?.remaining) || 0;
+
           await TicketType.findByIdAndUpdate(item.ticketTypeId, {
             $inc: { remaining: item.quantity },
           });
+
+          const afterTicketType = await TicketType.findById(item.ticketTypeId).select("remaining");
+          const afterRemaining = Number(afterTicketType?.remaining) || 0;
+
+          console.log(
+            `[REFUND][STOCK] event=${id} | order=${order._id} | ticketType=${getTicketTypeLabel(beforeTicketType, item.ticketTypeId)} | +${Number(item?.quantity) || 0} | remaining ${beforeRemaining} -> ${afterRemaining}`
+          );
+
+          refundedTickets += Number(item?.quantity) || 0;
         }
       }
 
@@ -178,8 +199,11 @@ exports.cancelAndRefundEvent = async (req, res, next) => {
         $set: { status: "refunded", cancelReason: reason },
       });
 
+      console.log(`[REFUND][EVENT] event=${id} | order=${order._id} | ${order.status} -> refunded | reason=${reason} | refundedTickets=${refundedTickets}`);
       refundedCount += 1;
     }
+
+    console.log(`[REFUND][EVENT] completed event=${id} | refundedOrders=${refundedCount}`);
 
     return res.json({
       success: true,

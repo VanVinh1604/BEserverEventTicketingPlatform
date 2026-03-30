@@ -33,6 +33,7 @@ app.use("/api/auth", require("./routes/authRoutes"));
 app.use("/api/orders", require("./routes/orderRoutes"));
 app.use("/api/events", require("./routes/eventRoutes"));
 app.use("/api/tickets", require("./routes/publicTicketRoutes"));
+app.use("/api/ticket-types", require("./routes/publicTicketRoutes"));
 app.use("/api/admin/users", require("./routes/adminUserRoutes"));
 
 // 4. CÁC ROUTE QUẢN TRỊ (ADMIN)

@@ -12,6 +12,32 @@ const populateOrderWithDetails = async (orderId) =>
     .populate("event")
     .populate({ path: "tickets", populate: { path: "ticketType" } });
 
+const getTicketTypeLabel = (ticketTypeDoc, fallbackId) =>
+  ticketTypeDoc?.name || String(fallbackId || "unknown_ticket_type");
+
+const formatRefundTicketSummary = async (pendingItems = []) => {
+  const safeItems = Array.isArray(pendingItems) ? pendingItems : [];
+  const lines = [];
+
+  for (const item of safeItems) {
+    const qty = Number(item?.quantity) || 0;
+    const ticketTypeId = item?.ticketTypeId;
+    if (!ticketTypeId || qty <= 0) continue;
+
+    let ticketName = String(ticketTypeId);
+    try {
+      const ticketType = await TicketType.findById(ticketTypeId).select("name");
+      if (ticketType?.name) ticketName = ticketType.name;
+    } catch {
+      // giữ fallback ticketTypeId
+    }
+
+    lines.push(`${ticketName} x${qty}`);
+  }
+
+  return lines;
+};
+
 /**
  * Huỷ / hoàn tiền một đơn hàng.
  * - pending  → cancelled  (hoàn vé remaining)
@@ -22,17 +48,39 @@ const cancelOrRefundOrderById = async (orderId, reason = "manual_cancel") => {
   const order = await Order.findById(orderId);
   if (!order) return { cancelled: false, order: null };
 
+  console.log(
+    `[REFUND][ORDER] start order=${orderId} | status=${order.status} | reason=${reason}`
+  );
+
   if (order.status === "pending") {
+    const refundedTicketLines = await formatRefundTicketSummary(order.pendingItems || []);
+    let totalRefundedTickets = 0;
+
     // Hoàn vé cho đơn pending
     for (const item of order.pendingItems || []) {
+      const beforeTicketType = await TicketType.findById(item.ticketTypeId).select("name remaining");
+      const beforeRemaining = Number(beforeTicketType?.remaining) || 0;
+
       await TicketType.findByIdAndUpdate(item.ticketTypeId, {
         $inc: { remaining: item.quantity },
       });
+
+      const afterTicketType = await TicketType.findById(item.ticketTypeId).select("remaining");
+      const afterRemaining = Number(afterTicketType?.remaining) || 0;
+
+      console.log(
+        `[REFUND][STOCK] order=${orderId} | ticketType=${getTicketTypeLabel(beforeTicketType, item.ticketTypeId)} | +${Number(item?.quantity) || 0} | remaining ${beforeRemaining} -> ${afterRemaining}`
+      );
+
+      totalRefundedTickets += Number(item?.quantity) || 0;
     }
     await Order.findByIdAndUpdate(orderId, {
       $set: { status: "cancelled", cancelReason: reason },
     });
-    console.log(`🔄 Order ${orderId} cancelled (${reason}), vé đã được trả lại`);
+    console.log(`[REFUND][ORDER] ${orderId} pending -> cancelled | reason=${reason} | refundedTickets=${totalRefundedTickets}`);
+    if (refundedTicketLines.length > 0) {
+      console.log(`[REFUND][DETAIL] ${orderId} | ${refundedTicketLines.join(" | ")}`);
+    }
     const updated = await Order.findById(orderId);
     return { cancelled: true, order: updated };
   }
@@ -42,7 +90,10 @@ const cancelOrRefundOrderById = async (orderId, reason = "manual_cancel") => {
     await Order.findByIdAndUpdate(orderId, {
       $set: { status: "refunded", cancelReason: reason },
     });
-    console.log(`💸 Order ${orderId} marked refunded (${reason})`);
+    const ticketCount = Array.isArray(order.tickets) ? order.tickets.length : 0;
+    console.log(
+      `[REFUND][ORDER] ${orderId} paid -> refunded | reason=${reason} | issuedTickets=${ticketCount} | user=${order.user} | event=${order.event}`
+    );
     const updated = await Order.findById(orderId);
     return { cancelled: true, order: updated };
   }

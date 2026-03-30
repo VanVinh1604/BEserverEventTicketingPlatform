@@ -2,6 +2,7 @@ const express = require("express");
 const router = express.Router();
 
 const TicketType = require("../models/TicketType");
+const Event = require("../models/Event");
 const Ticket = require("../models/Ticket"); // 👉 Phải import bảng Vé vào mới quét được vé
 const { protect, authorize } = require("../middleware/authMiddleware");
 
@@ -61,10 +62,39 @@ router.use(protect, authorize("admin"));
 // CREATE
 router.post("/", async (req, res) => {
   try {
-    const ticket = await TicketType.create(req.body);
-    res.status(201).json(ticket);
+    const { event, name, price, quantity, remaining, description, isActive } = req.body || {};
+
+    if (!event || !name) {
+      return res.status(400).json({ success: false, message: "Thiếu event hoặc name" });
+    }
+
+    const parsedPrice = Number(price);
+    const parsedQuantity = Number(quantity);
+    const parsedRemaining =
+      remaining !== undefined ? Number(remaining) : parsedQuantity;
+
+    if (!Number.isFinite(parsedPrice) || parsedPrice < 0) {
+      return res.status(400).json({ success: false, message: "Giá vé không hợp lệ" });
+    }
+    if (!Number.isFinite(parsedQuantity) || parsedQuantity <= 0) {
+      return res.status(400).json({ success: false, message: "Số lượng vé không hợp lệ" });
+    }
+
+    const ticket = await TicketType.create({
+      event,
+      name: String(name).trim(),
+      description: typeof description === "string" ? description : "",
+      price: parsedPrice,
+      quantity: parsedQuantity,
+      remaining: Number.isFinite(parsedRemaining) ? Math.max(0, parsedRemaining) : parsedQuantity,
+      isActive: isActive !== false,
+    });
+
+    await Event.findByIdAndUpdate(event, { $addToSet: { ticketTypes: ticket._id } });
+
+    res.status(201).json({ success: true, data: ticket });
   } catch (err) {
-    res.status(400).json({ message: err.message });
+    res.status(400).json({ success: false, message: err.message });
   }
 });
 
@@ -76,18 +106,73 @@ router.get("/", async (req, res) => {
 
 // UPDATE
 router.put("/:id", async (req, res) => {
+  const existing = await TicketType.findById(req.params.id);
+  if (!existing) {
+    return res.status(404).json({ success: false, message: "Không tìm thấy loại vé" });
+  }
+
+  const updateData = {};
+  const { event, name, description, price, quantity, remaining, isActive } = req.body || {};
+
+  if (event !== undefined) updateData.event = event;
+  if (name !== undefined) updateData.name = String(name).trim();
+  if (description !== undefined) updateData.description = typeof description === "string" ? description : "";
+
+  if (price !== undefined) {
+    const parsedPrice = Number(price);
+    if (!Number.isFinite(parsedPrice) || parsedPrice < 0) {
+      return res.status(400).json({ success: false, message: "Giá vé không hợp lệ" });
+    }
+    updateData.price = parsedPrice;
+  }
+
+  if (quantity !== undefined) {
+    const parsedQuantity = Number(quantity);
+    if (!Number.isFinite(parsedQuantity) || parsedQuantity <= 0) {
+      return res.status(400).json({ success: false, message: "Số lượng vé không hợp lệ" });
+    }
+    updateData.quantity = parsedQuantity;
+  }
+
+  if (remaining !== undefined) {
+    const parsedRemaining = Number(remaining);
+    if (!Number.isFinite(parsedRemaining) || parsedRemaining < 0) {
+      return res.status(400).json({ success: false, message: "Số vé còn lại không hợp lệ" });
+    }
+    updateData.remaining = parsedRemaining;
+  }
+
+  if (isActive !== undefined) updateData.isActive = isActive !== false;
+
+  // Nếu admin đổi quantity mà không gửi remaining, giữ lại số vé đã bán.
+  if (updateData.quantity !== undefined && updateData.remaining === undefined) {
+    const sold = Math.max(0, (Number(existing.quantity) || 0) - (Number(existing.remaining) || 0));
+    updateData.remaining = Math.max(0, updateData.quantity - sold);
+  }
+
   const ticket = await TicketType.findByIdAndUpdate(
     req.params.id,
-    req.body,
-    { new: true }
+    { $set: updateData },
+    { new: true, runValidators: true }
   );
-  res.json(ticket);
+
+  const oldEventId = existing.event ? String(existing.event) : "";
+  const newEventId = ticket?.event ? String(ticket.event) : "";
+  if (oldEventId && newEventId && oldEventId !== newEventId) {
+    await Event.findByIdAndUpdate(oldEventId, { $pull: { ticketTypes: existing._id } });
+    await Event.findByIdAndUpdate(newEventId, { $addToSet: { ticketTypes: existing._id } });
+  }
+
+  res.json({ success: true, data: ticket });
 });
 
 // DELETE
 router.delete("/:id", async (req, res) => {
-  await TicketType.findByIdAndDelete(req.params.id);
-  res.json({ message: "Deleted" });
+  const deleted = await TicketType.findByIdAndDelete(req.params.id);
+  if (deleted?.event) {
+    await Event.findByIdAndUpdate(deleted.event, { $pull: { ticketTypes: deleted._id } });
+  }
+  res.json({ success: true, message: "Deleted" });
 });
 
 module.exports = router;

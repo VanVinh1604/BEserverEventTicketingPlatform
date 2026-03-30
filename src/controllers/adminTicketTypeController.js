@@ -1,21 +1,27 @@
 const TicketType = require("../models/TicketType");
 const Ticket = require("../models/Ticket"); // 👉 Thêm model Ticket để check-in
 const AppError = require("../utils/AppError");
+const mongoose = require("mongoose");
 
 exports.createTicketType = async (req, res, next) => {
   try {
-    const { event, name, price, quantity } = req.body;
+    const { event, name, price, quantity, description, isActive, remaining } = req.body;
 
     if (!event || !name) {
       throw new AppError("Missing fields", 400);
     }
 
+    const parsedQuantity = Number(quantity);
+    const parsedRemaining = remaining !== undefined ? Number(remaining) : parsedQuantity;
+
     const ticketType = await TicketType.create({
       event,
-      name,
-      price,
-      quantity,
-      remaining: quantity,
+      name: String(name).trim(),
+      description: typeof description === "string" ? description : "",
+      price: Number(price) || 0,
+      quantity: Number.isFinite(parsedQuantity) ? parsedQuantity : 0,
+      remaining: Number.isFinite(parsedRemaining) ? parsedRemaining : 0,
+      isActive: isActive !== false,
     });
 
     res.json(ticketType);
@@ -48,13 +54,31 @@ exports.deleteTicketType = async (req, res, next) => {
 
 exports.getTicketTypes = async (req, res, next) => {
   try {
-    // Lấy tất cả danh sách loại vé từ Database
-    // Dùng populate để lấy luôn thông tin cơ bản của Sự kiện đính kèm
-    const ticketTypes = await TicketType.find().populate("event", "title location startDate");
+    const eventId = req.params?.eventId || req.query?.event;
+    const includeInactive = String(req.query?.includeInactive || "").toLowerCase() === "true";
+
+    const query = {};
+    if (eventId) {
+      if (!mongoose.Types.ObjectId.isValid(eventId)) {
+        return res.status(400).json({
+          success: false,
+          message: "event id không hợp lệ",
+        });
+      }
+      query.event = eventId;
+    }
+    if (!includeInactive) {
+      query.isActive = { $ne: false };
+    }
+
+    // Lấy danh sách loại vé + thông tin sự kiện cơ bản, ưu tiên thứ tự giá tăng dần.
+    const ticketTypes = await TicketType.find(query)
+      .populate("event", "title location startDate endDate status")
+      .sort({ price: 1, name: 1 });
     
-    // Trả về cho Frontend
     res.status(200).json({
       success: true,
+      results: ticketTypes.length,
       data: ticketTypes
     });
   } catch (err) {

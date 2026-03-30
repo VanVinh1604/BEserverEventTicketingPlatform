@@ -5,6 +5,7 @@ const { checkInTicket } = require("../controllers/ticketController"); // Import 
 const { protect, authorize } = require("../middleware/authMiddleware");
 
 // Lấy danh sách loại vé (Công khai)
+router.get("/event/:eventId", getTicketTypes);
 router.get("/", getTicketTypes);
 
 // Cổng xác minh vé (Chỉ dành cho Admin)
