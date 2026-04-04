@@ -4,6 +4,323 @@ const crypto = require("crypto");
 // Đảm bảo đường dẫn này đúng với máy bạn (file tạo token)
 const { generateAccessToken, generateRefreshToken } = require("../config/jwt");
 
+const GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
+const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
+const GOOGLE_USERINFO_URL = "https://openidconnect.googleapis.com/v1/userinfo";
+const FACEBOOK_AUTH_URL = "https://www.facebook.com/v20.0/dialog/oauth";
+const FACEBOOK_TOKEN_URL = "https://graph.facebook.com/v20.0/oauth/access_token";
+const FACEBOOK_USERINFO_URL = "https://graph.facebook.com/me";
+const FRONTEND_SOCIAL_CALLBACK_PATH = "/auth/callback";
+
+const normalizeUrl = (value = "") => String(value).trim().replace(/\/+$/, "");
+
+const encodeBase64Url = (value) =>
+  Buffer.from(String(value), "utf8")
+    .toString("base64")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+
+const decodeBase64Url = (value = "") => {
+  const base64 = String(value)
+    .replace(/-/g, "+")
+    .replace(/_/g, "/")
+    .padEnd(Math.ceil(String(value).length / 4) * 4, "=");
+  return Buffer.from(base64, "base64").toString("utf8");
+};
+
+const safeRedirectPath = (value = "/") => {
+  const path = String(value || "").trim();
+  if (!path.startsWith("/") || path.startsWith("//")) return "/";
+  return path;
+};
+
+const getServerBaseUrl = (req) => {
+  const proto = req.headers["x-forwarded-proto"] || req.protocol;
+  const host = req.headers["x-forwarded-host"] || req.get("host");
+  return `${proto}://${host}`;
+};
+
+const buildFrontendCallbackUrl = ({ provider, redirectPath, accessToken, refreshToken, user, error }) => {
+  const clientUrl = normalizeUrl(process.env.CLIENT_URL || "http://localhost:3000");
+  const callbackUrl = new URL(`${clientUrl}${FRONTEND_SOCIAL_CALLBACK_PATH}`);
+  callbackUrl.searchParams.set("provider", provider);
+  callbackUrl.searchParams.set("redirect", safeRedirectPath(redirectPath));
+
+  if (error) {
+    callbackUrl.searchParams.set("error", error);
+    return callbackUrl.toString();
+  }
+
+  callbackUrl.searchParams.set("accessToken", accessToken);
+  callbackUrl.searchParams.set("refreshToken", refreshToken);
+  callbackUrl.searchParams.set(
+    "user",
+    encodeBase64Url(JSON.stringify({
+      _id: user._id,
+      username: user.username,
+      email: user.email,
+      role: user.role,
+    }))
+  );
+  return callbackUrl.toString();
+};
+
+const getUniqueUsername = async (name, email) => {
+  const rawBase = (name || email?.split("@")[0] || "user")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9_]/g, "")
+    .slice(0, 18);
+
+  const base = rawBase || "user";
+  let candidate = base;
+  let counter = 1;
+
+  while (await User.exists({ username: candidate })) {
+    candidate = `${base}${counter}`;
+    counter += 1;
+  }
+
+  return candidate;
+};
+
+const finalizeSocialAuth = async ({ profile, provider, redirectPath }, res) => {
+  if (!profile?.email) {
+    const missingEmailUrl = buildFrontendCallbackUrl({
+      provider,
+      redirectPath,
+      error: "Không lấy được email từ nhà cung cấp đăng nhập.",
+    });
+    return res.redirect(missingEmailUrl);
+  }
+
+  let user = await User.findOne({ email: String(profile.email).toLowerCase() });
+
+  if (!user) {
+    const username = await getUniqueUsername(profile.name, profile.email);
+    const randomPassword = crypto.randomBytes(24).toString("hex");
+
+    user = await User.create({
+      username,
+      email: String(profile.email).toLowerCase(),
+      password: randomPassword,
+      role: "user",
+      ...(provider === "google" && profile.providerId ? { googleId: profile.providerId } : {}),
+      ...(provider === "facebook" && profile.providerId ? { facebookId: profile.providerId } : {}),
+      ...(profile.avatar ? { avatar: profile.avatar } : {}),
+    });
+  } else {
+    const patch = {};
+    if (provider === "google" && profile.providerId && !user.googleId) patch.googleId = profile.providerId;
+    if (provider === "facebook" && profile.providerId && !user.facebookId) patch.facebookId = profile.providerId;
+    if (profile.avatar && !user.avatar) patch.avatar = profile.avatar;
+    if (Object.keys(patch).length > 0) {
+      user.set(patch);
+      await user.save({ validateBeforeSave: false });
+    }
+  }
+
+  const accessToken = generateAccessToken(user);
+  const refreshToken = generateRefreshToken(user);
+  user.refreshToken = refreshToken;
+  await user.save({ validateBeforeSave: false });
+
+  const redirectUrl = buildFrontendCallbackUrl({
+    provider,
+    redirectPath,
+    accessToken,
+    refreshToken,
+    user,
+  });
+
+  return res.redirect(redirectUrl);
+};
+
+const redirectToSocialError = (res, provider, redirectPath, message) => {
+  const errUrl = buildFrontendCallbackUrl({
+    provider,
+    redirectPath,
+    error: message,
+  });
+  return res.redirect(errUrl);
+};
+
+// --- 0. SOCIAL LOGIN (GOOGLE + FACEBOOK) ---
+exports.startGoogleAuth = (req, res) => {
+  if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
+    return res.status(500).json({ message: "Thiếu cấu hình GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET" });
+  }
+
+  const redirectPath = safeRedirectPath(req.query.redirect || "/");
+  const state = encodeBase64Url(JSON.stringify({ redirectPath }));
+  const redirectUri = `${getServerBaseUrl(req)}/api/auth/google/callback`;
+
+  const params = new URLSearchParams({
+    client_id: process.env.GOOGLE_CLIENT_ID,
+    redirect_uri: redirectUri,
+    response_type: "code",
+    scope: "openid email profile",
+    access_type: "offline",
+    prompt: "select_account",
+    state,
+  });
+
+  return res.redirect(`${GOOGLE_AUTH_URL}?${params.toString()}`);
+};
+
+exports.handleGoogleCallback = async (req, res) => {
+  const code = req.query.code;
+  const state = req.query.state;
+  let redirectPath = "/";
+
+  try {
+    if (state) {
+      const parsed = JSON.parse(decodeBase64Url(state));
+      redirectPath = safeRedirectPath(parsed.redirectPath || "/");
+    }
+  } catch {
+    redirectPath = "/";
+  }
+
+  if (!code) {
+    return redirectToSocialError(res, "google", redirectPath, "Đăng nhập Google thất bại (thiếu code).");
+  }
+
+  try {
+    const redirectUri = `${getServerBaseUrl(req)}/api/auth/google/callback`;
+    const tokenBody = new URLSearchParams({
+      code: String(code),
+      client_id: process.env.GOOGLE_CLIENT_ID,
+      client_secret: process.env.GOOGLE_CLIENT_SECRET,
+      redirect_uri: redirectUri,
+      grant_type: "authorization_code",
+    });
+
+    const tokenRes = await fetch(GOOGLE_TOKEN_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: tokenBody.toString(),
+    });
+
+    const tokenJson = await tokenRes.json();
+    if (!tokenRes.ok || !tokenJson.access_token) {
+      return redirectToSocialError(res, "google", redirectPath, "Không lấy được access token từ Google.");
+    }
+
+    const profileRes = await fetch(GOOGLE_USERINFO_URL, {
+      headers: { Authorization: `Bearer ${tokenJson.access_token}` },
+    });
+    const profile = await profileRes.json();
+
+    if (!profileRes.ok) {
+      return redirectToSocialError(res, "google", redirectPath, "Không lấy được hồ sơ người dùng Google.");
+    }
+
+    return finalizeSocialAuth(
+      {
+        provider: "google",
+        redirectPath,
+        profile: {
+          providerId: profile.sub,
+          email: profile.email,
+          name: profile.name,
+          avatar: profile.picture,
+        },
+      },
+      res
+    );
+  } catch (err) {
+    console.error("🔥 [GOOGLE CALLBACK EXCEPTION]:", err);
+    return redirectToSocialError(res, "google", redirectPath, "Đăng nhập Google thất bại.");
+  }
+};
+
+exports.startFacebookAuth = (req, res) => {
+  if (!process.env.FACEBOOK_CLIENT_ID || !process.env.FACEBOOK_CLIENT_SECRET) {
+    return res.status(500).json({ message: "Thiếu cấu hình FACEBOOK_CLIENT_ID/FACEBOOK_CLIENT_SECRET" });
+  }
+
+  const redirectPath = safeRedirectPath(req.query.redirect || "/");
+  const state = encodeBase64Url(JSON.stringify({ redirectPath }));
+  const redirectUri = `${getServerBaseUrl(req)}/api/auth/facebook/callback`;
+
+  const params = new URLSearchParams({
+    client_id: process.env.FACEBOOK_CLIENT_ID,
+    redirect_uri: redirectUri,
+    state,
+    scope: "email,public_profile",
+    response_type: "code",
+  });
+
+  return res.redirect(`${FACEBOOK_AUTH_URL}?${params.toString()}`);
+};
+
+exports.handleFacebookCallback = async (req, res) => {
+  const code = req.query.code;
+  const state = req.query.state;
+  let redirectPath = "/";
+
+  try {
+    if (state) {
+      const parsed = JSON.parse(decodeBase64Url(state));
+      redirectPath = safeRedirectPath(parsed.redirectPath || "/");
+    }
+  } catch {
+    redirectPath = "/";
+  }
+
+  if (!code) {
+    return redirectToSocialError(res, "facebook", redirectPath, "Đăng nhập Facebook thất bại (thiếu code).");
+  }
+
+  try {
+    const redirectUri = `${getServerBaseUrl(req)}/api/auth/facebook/callback`;
+    const tokenParams = new URLSearchParams({
+      client_id: process.env.FACEBOOK_CLIENT_ID,
+      client_secret: process.env.FACEBOOK_CLIENT_SECRET,
+      redirect_uri: redirectUri,
+      code: String(code),
+    });
+
+    const tokenRes = await fetch(`${FACEBOOK_TOKEN_URL}?${tokenParams.toString()}`);
+    const tokenJson = await tokenRes.json();
+
+    if (!tokenRes.ok || !tokenJson.access_token) {
+      return redirectToSocialError(res, "facebook", redirectPath, "Không lấy được access token từ Facebook.");
+    }
+
+    const profileParams = new URLSearchParams({
+      fields: "id,name,email,picture.type(large)",
+      access_token: tokenJson.access_token,
+    });
+    const profileRes = await fetch(`${FACEBOOK_USERINFO_URL}?${profileParams.toString()}`);
+    const profile = await profileRes.json();
+
+    if (!profileRes.ok) {
+      return redirectToSocialError(res, "facebook", redirectPath, "Không lấy được hồ sơ người dùng Facebook.");
+    }
+
+    return finalizeSocialAuth(
+      {
+        provider: "facebook",
+        redirectPath,
+        profile: {
+          providerId: profile.id,
+          email: profile.email,
+          name: profile.name,
+          avatar: profile.picture?.data?.url,
+        },
+      },
+      res
+    );
+  } catch (err) {
+    console.error("🔥 [FACEBOOK CALLBACK EXCEPTION]:", err);
+    return redirectToSocialError(res, "facebook", redirectPath, "Đăng nhập Facebook thất bại.");
+  }
+};
+
 // --- 1. ĐĂNG KÝ (REGISTER) ---
 exports.register = async (req, res) => {
   // [DEBUG] Log xem dữ liệu Frontend gửi lên là gì

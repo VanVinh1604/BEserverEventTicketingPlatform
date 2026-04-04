@@ -3,6 +3,10 @@ const router = express.Router();
 
 // 1. Import Controller (Gộp lại cho gọn)
 const { 
+  startGoogleAuth,
+  handleGoogleCallback,
+  startFacebookAuth,
+  handleFacebookCallback,
   register, 
   login, 
   refreshToken, 
@@ -18,6 +22,12 @@ const {
 } = require("../middleware/validate"); // Nhớ check đúng đường dẫn file này
 
 // --- ĐỊNH NGHĨA ROUTE ---
+
+// Đăng nhập Social
+router.get("/google", startGoogleAuth);
+router.get("/google/callback", handleGoogleCallback);
+router.get("/facebook", startFacebookAuth);
+router.get("/facebook/callback", handleFacebookCallback);
 
 // Đăng ký: Có check dữ liệu đầu vào (registerSchema)
 router.post("/register", validateRequest(registerSchema), register);

@@ -41,7 +41,20 @@ const userSchema = new mongoose.Schema({
 
   // 4. Quên mật khẩu
   resetPasswordToken: String,
-  resetPasswordExpire: Date
+  resetPasswordExpire: Date,
+
+  // 5. Social login
+  googleId: {
+    type: String,
+    unique: true,
+    sparse: true
+  },
+  facebookId: {
+    type: String,
+    unique: true,
+    sparse: true
+  },
+  avatar: String
 
 }, {
   timestamps: true
